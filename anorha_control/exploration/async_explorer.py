@@ -93,9 +93,10 @@ class RealMouseExplorer:
         # Control
         self._running = False
         self._killed = False
+        self._paused = False
         
-        # Overlay indicator
-        self.indicator = get_indicator(on_kill=self._on_kill)
+        # Overlay indicator with pause support
+        self.indicator = get_indicator(on_kill=self._on_kill, on_pause=self._on_pause)
     
     def _on_kill(self):
         """Handle kill switch activation."""
@@ -104,6 +105,11 @@ class RealMouseExplorer:
         self._running = False
         if hasattr(self, 'session'):
             self.session.browser.close()
+    
+    def _on_pause(self, paused: bool):
+        """Handle pause toggle."""
+        self._paused = paused
+
     
     def _save_screenshot(self, image: Image.Image, prefix: str) -> str:
         """Save screenshot and return path."""
@@ -248,6 +254,10 @@ class RealMouseExplorer:
         for step_idx in range(max_steps):
             if self._killed:
                 break
+            
+            # Wait while paused
+            while self._paused and not self._killed:
+                await asyncio.sleep(0.5)
             
             # Determine effective instruction for this step
             if step_idx < len(current_plan):

@@ -256,19 +256,66 @@ class KillSwitch:
             self._listener = None
 
 
-class ControlIndicator:
-    """Combined overlay + cursor + kill switch."""
+class PauseSwitch:
+    """Listens for pause/resume hotkey."""
     
-    def __init__(self, on_kill: Callable = None):
+    def __init__(self, callback: Callable):
+        self.callback = callback
+        # Cross-platform hotkey
+        if sys.platform == "darwin":
+            self.hotkey = "<cmd>+<shift>+p"
+        else:
+            self.hotkey = "<ctrl>+<shift>+p"
+            
+        self._listener: Optional[keyboard.GlobalHotKeys] = None
+        self._paused = False
+    
+    def start(self):
+        """Start listening."""
+        def on_activate():
+            self._paused = not self._paused
+            status = "⏸️ PAUSED" if self._paused else "▶️ RESUMED"
+            print(f"\n{status} ({self.hotkey})")
+            self.callback(self._paused)
+        
+        try:
+            self._listener = keyboard.GlobalHotKeys({self.hotkey: on_activate})
+            self._listener.start()
+            print(f"[PauseSwitch] Listening for {self.hotkey}")
+        except Exception as e:
+            print(f"[PauseSwitch] Warning: Could not start hotkey listener: {e}")
+    
+    def stop(self):
+        """Stop listening."""
+        if self._listener:
+            self._listener.stop()
+            self._listener = None
+    
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
+
+class ControlIndicator:
+    """Combined overlay + cursor + kill switch + pause switch."""
+    
+    def __init__(self, on_kill: Callable = None, on_pause: Callable = None):
         self.border = ScreenBorder()
         self.cursor = CursorIndicator()
         self.on_kill = on_kill or (lambda: None)
+        self.on_pause = on_pause or (lambda paused: None)
         self.kill_switch = KillSwitch(self._handle_kill)
+        self.pause_switch = PauseSwitch(self._handle_pause)
         self._running = False
+        self._paused = False
     
     def _handle_kill(self):
         self.stop()
         self.on_kill()
+    
+    def _handle_pause(self, paused: bool):
+        self._paused = paused
+        self.on_pause(paused)
     
     def start(self):
         """Activate everything."""
@@ -280,6 +327,7 @@ class ControlIndicator:
         
         self.border.show()
         self.kill_switch.start()
+        self.pause_switch.start()
     
     def stop(self):
         """Deactivate."""
@@ -289,6 +337,7 @@ class ControlIndicator:
         self._running = False
         self.border.hide()
         self.kill_switch.stop()
+        self.pause_switch.stop()
     
     def show_click(self, x: int, y: int):
         """Show cursor indicator at click position."""
@@ -297,11 +346,16 @@ class ControlIndicator:
     @property
     def is_running(self) -> bool:
         return self._running
+    
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
 
 
-def get_indicator(on_kill: Callable = None) -> ControlIndicator:
+def get_indicator(on_kill: Callable = None, on_pause: Callable = None) -> ControlIndicator:
     """Get the control indicator."""
-    return ControlIndicator(on_kill)
+    return ControlIndicator(on_kill, on_pause)
+
 
 
 # Quick test

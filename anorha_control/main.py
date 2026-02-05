@@ -64,9 +64,24 @@ async def run_explore(args):
     
     print("\n⚠️  WARNING: This will control your REAL mouse!")
     print("   Press Cmd+Shift+Escape at any time to STOP")
+    print("   Press Cmd+Shift+P to PAUSE/RESUME")
     print("\n   Starting in 3 seconds...")
     
+    # Launch dashboard in background if requested
+    dashboard_thread = None
+    if getattr(args, 'with_dashboard', False):
+        import threading
+        from anorha_control.dashboard.app import launch_dashboard
+        
+        def run_dashboard():
+            launch_dashboard(port=7860, share=False)
+        
+        dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+        dashboard_thread.start()
+        print("\n📊 Dashboard starting at http://localhost:7860")
+    
     await asyncio.sleep(3)
+
     
     from anorha_control.models.local_llm import LocalLLM, TaskPlanner
     
@@ -258,6 +273,8 @@ def main():
     explore_parser.add_argument("--checkpoint", type=str, help="Load TRM checkpoint")
     explore_parser.add_argument("--planner-model", type=str, default="qwen3-vl:2b", help="VL model for planning")
     explore_parser.add_argument("--headless", action="store_true", help="Run in sandboxed browser mode (doesn't control your mouse)")
+    explore_parser.add_argument("--with-dashboard", action="store_true", help="Launch Gradio dashboard in background")
+
 
     
     # Train command
