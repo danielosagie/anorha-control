@@ -31,7 +31,7 @@ class StrategicPlanner:
     
     def __init__(
         self,
-        model: str = "glm4:19b-flash",
+        model: str = "glm-4.7-flash:q4_K_M",
         base_url: str = "http://localhost:11434",
         timeout: float = 60.0,  # GLM needs more time
     ):
@@ -39,7 +39,7 @@ class StrategicPlanner:
         self.base_url = base_url
         self.timeout = timeout
         self._available: Optional[bool] = None
-        self._fallback_model = "qwen3:7b"
+        self._fallback_model = "qwen2.5vl:7b"
     
     @property
     def available(self) -> bool:

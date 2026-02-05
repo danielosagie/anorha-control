@@ -225,6 +225,121 @@ Be concise. Output ONLY valid JSON, no explanation."""
         
         summary = ", ".join(f"{count} {t}s" for t, count in element_types.items())
         return f"Screen with {summary}"
+    
+    def locate_target(
+        self, 
+        target_description: str, 
+        screenshot: Image.Image,
+        viewport_width: int = 1280,
+        viewport_height: int = 800,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Use VLM to locate a target element and return its pixel coordinates.
+        
+        This is the KEY method for supervised training - it provides ground truth
+        pixel coordinates for the TRM to learn from.
+        
+        Args:
+            target_description: What to find (e.g., "Login button", "username field")
+            screenshot: PIL Image of the current screen
+            viewport_width: Viewport width for coordinate scaling
+            viewport_height: Viewport height for coordinate scaling
+            
+        Returns:
+            Dict with {x, y, confidence, action_type} or None if not found
+        """
+        # Convert PIL to base64
+        buffered = io.BytesIO()
+        screenshot.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
+        system = f"""You are a precise UI element locator. 
+The image is {viewport_width}x{viewport_height} pixels.
+Find the element described and output its CENTER coordinates as JSON.
+Output ONLY: {{"x": <pixel_x>, "y": <pixel_y>, "confidence": <0.0-1.0>, "found": true/false}}
+If element not found, set found=false and x=0, y=0.
+Be VERY precise with pixel coordinates based on the visual."""
+
+        prompt = f"Find this element and output its center pixel coordinates: {target_description}"
+        
+        response = self.generate(
+            prompt, 
+            system=system, 
+            images=[img_base64], 
+            temperature=0.0,  # Deterministic
+            max_tokens=100,
+        )
+        
+        # Parse JSON response
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start >= 0 and end > start:
+                result = json.loads(response[start:end])
+                if result.get("found", False):
+                    return {
+                        "x": int(result.get("x", 0)),
+                        "y": int(result.get("y", 0)),
+                        "confidence": float(result.get("confidence", 0.5)),
+                        "found": True,
+                    }
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[LocalLLM] locate_target parse error: {e}")
+        
+        return None
+    
+    def verify_action(
+        self, 
+        action_description: str,
+        before_screenshot: Image.Image,
+        after_screenshot: Image.Image,
+    ) -> Dict[str, Any]:
+        """
+        Use VLM to verify if an action succeeded by comparing before/after screenshots.
+        
+        Args:
+            action_description: What was attempted (e.g., "click Login button")
+            before_screenshot: Screenshot before action
+            after_screenshot: Screenshot after action
+            
+        Returns:
+            Dict with {success: bool, reason: str, next_action: str}
+        """
+        # Convert to base64
+        buf_before = io.BytesIO()
+        before_screenshot.save(buf_before, format="PNG")
+        img_before = base64.b64encode(buf_before.getvalue()).decode("utf-8")
+        
+        buf_after = io.BytesIO()
+        after_screenshot.save(buf_after, format="PNG")
+        img_after = base64.b64encode(buf_after.getvalue()).decode("utf-8")
+        
+        system = """You verify if a UI action succeeded.
+Compare the two images: first is BEFORE, second is AFTER the action.
+Output ONLY JSON: {"success": true/false, "reason": "brief explanation", "next_action": "what to do next or empty"}"""
+
+        prompt = f"Did this action succeed? Action: {action_description}"
+        
+        response = self.generate(
+            prompt, 
+            system=system, 
+            images=[img_before, img_after], 
+            temperature=0.0,
+            max_tokens=150,
+        )
+        
+        # Parse response
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(response[start:end])
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        # Default: assume success if screen changed
+        return {"success": True, "reason": "Unable to verify", "next_action": ""}
+
 
 
 class TaskPlanner:

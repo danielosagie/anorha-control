@@ -142,7 +142,57 @@ class SandboxExplorer:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         self._page = await self._context.new_page()
-        print("[Sandbox] Browser initialized")
+        
+        # Inject ad blocking CSS on every page load
+        await self._page.add_init_script("""
+            // Block ads via CSS
+            const style = document.createElement('style');
+            style.textContent = `
+                /* Hide common ad containers */
+                [class*="ad-"], [class*="ads-"], [class*="advert"],
+                [id*="ad-"], [id*="ads-"], [id*="advert"],
+                [class*="sponsor"], [id*="sponsor"],
+                [class*="banner"], [id*="banner"],
+                [class*="promo"], [id*="promo"],
+                iframe[src*="ad"], iframe[src*="doubleclick"],
+                iframe[src*="googlesyndication"], iframe[src*="amazon-adsystem"],
+                [class*="google-ad"], [class*="googleAd"],
+                [data-ad], [data-ads], [data-advert],
+                ins.adsbygoogle, .adsbygoogle,
+                [class*="Ad__"], [class*="__ad"],
+                [class*="outbrain"], [class*="taboola"],
+                [aria-label*="advertisement"], [aria-label*="Advertisement"],
+                div[style*="position: fixed"][style*="z-index: 9"],
+                .overlay-ad, .popup-ad, .modal-ad {
+                    display: none !important;
+                    visibility: hidden !important;
+                    height: 0 !important;
+                    width: 0 !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                }
+            `;
+            document.head.appendChild(style);
+            
+            // Block ad scripts
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.tagName === 'SCRIPT' || node.tagName === 'IFRAME') {
+                            const src = node.src || '';
+                            if (src.includes('ad') || src.includes('doubleclick') || 
+                                src.includes('googlesyndication') || src.includes('amazon-adsystem')) {
+                                node.remove();
+                            }
+                        }
+                    });
+                });
+            });
+            observer.observe(document.body || document.documentElement, {childList: true, subtree: true});
+        """)
+        
+        print("[Sandbox] Browser initialized with ad blocking")
+
     
     async def _close_browser(self):
         """Close browser."""
@@ -337,81 +387,190 @@ class SandboxExplorer:
 
     
     async def explore_episode(self) -> List[Experience]:
-        """Run one exploration episode."""
+        """
+        Run one exploration episode with CLOSED-LOOP VLM supervision.
+        
+        For each step:
+        1. VLM provides pixel-level target coordinates (ground truth)
+        2. TRM predicts where it thinks the target is
+        3. Compare TRM vs VLM distance → this IS the training signal
+        4. Execute the closer/better prediction
+        5. Store experience WITH VLM ground truth for supervised learning
+        """
         experiences = []
         
         print(f"\n📍 Episode {self.episode_count + 1}")
         print(f"   Site: {self.current_site}")
         print(f"   Task: {self.current_instruction}")
         
-        # VLM Planning
+        # VLM Planning - get step list
         current_plan = []
         if self.planner and self.planner.llm.available:
             print("   🧠 VLM Planning...")
             planning_img = await self._screenshot()
             current_plan = self.planner.plan_task_with_vision(self.current_instruction, planning_img)
             if current_plan:
-                print(f"   📝 Plan: {[s.target for s in current_plan[:3]]}...")
+                print(f"   📝 Plan: {[s.target for s in current_plan[:5]]}...")
         
-        max_steps = max(self.config.max_episode_steps, len(current_plan))
+        max_steps = min(self.config.max_episode_steps, max(5, len(current_plan) + 2))
+        consecutive_failures = 0
         
         for step_idx in range(max_steps):
-            if not self._running:
+            if not self._running or consecutive_failures >= 3:
+                if consecutive_failures >= 3:
+                    print("   ⚠️ 3 consecutive failures - ending episode")
                 break
             
             while self._paused:
                 await asyncio.sleep(0.5)
             
-            # Determine instruction for this step
+            # Determine target for this step
             if step_idx < len(current_plan):
                 step = current_plan[step_idx]
                 step_instruction = f"{step.action} {step.target}"
+                target_description = step.target
             else:
                 step_instruction = self.current_instruction
+                target_description = self.current_instruction
             
             print(f"\n   Step {step_idx + 1}/{max_steps}: {step_instruction}")
             
-            # Capture before
+            # Capture screenshot
             before_img = await self._screenshot()
             before_path = self._save_screenshot(before_img, "before")
             state_hash_before = phash_image(before_img)
             
-            # Get elements and embedding
+            # Get elements for context
             elements = await self._get_clickable_elements()
             embedding = self.vision_encoder.encode_image(before_img)
             
-            # Generate action with task context
-            action = self._generate_action(elements, embedding, step_instruction)
+            # =========================================================
+            # PHASE 1: Get VLM target (ground truth for training)
+            # =========================================================
+            vlm_target = None
+            if self.planner and self.planner.llm.available:
+                vlm_target = self.planner.llm.locate_target(
+                    target_description, 
+                    before_img,
+                    self.config.viewport_width,
+                    self.config.viewport_height
+                )
             
-            # Log TRM vs actual action
-            print(f"   🤖 TRM: ({action.get('trm_x', 0):.0f}, {action.get('trm_y', 0):.0f}) | Action: ({action['x']}, {action['y']}) [{action['source']}]")
+            # =========================================================
+            # PHASE 2: Get TRM prediction
+            # =========================================================
+            with torch.no_grad():
+                trm_out = self.trm(embedding)
+                trm_x = trm_out["coords"][0, 0].item()
+                trm_y = trm_out["coords"][0, 1].item()
+                trm_action_type = trm_out["action_type"][0].argmax().item()
             
-            # Execute
+            trm_px = int(trm_x * self.config.viewport_width)
+            trm_py = int(trm_y * self.config.viewport_height)
+            
+            # =========================================================
+            # PHASE 3: Compare TRM vs VLM and decide execution
+            # =========================================================
+            import math
+            
+            if vlm_target and vlm_target.get("found"):
+                vlm_x, vlm_y = vlm_target["x"], vlm_target["y"]
+                distance = math.sqrt((trm_px - vlm_x)**2 + (trm_py - vlm_y)**2)
+                
+                # Distance-based reward (KEY training signal)
+                if distance < 15:
+                    distance_reward = 1.0
+                elif distance < 30:
+                    distance_reward = 0.8
+                elif distance < 60:
+                    distance_reward = 0.5
+                elif distance < 100:
+                    distance_reward = 0.2
+                else:
+                    distance_reward = 0.0
+                
+                # Execute TRM if close enough, otherwise use VLM (but store correction)
+                if distance < 30:
+                    exec_x, exec_y = trm_px, trm_py
+                    source = "trm"
+                    print(f"   🎯 VLM: ({vlm_x}, {vlm_y}) | TRM: ({trm_px}, {trm_py}) | dist={distance:.0f}px ✓")
+                else:
+                    exec_x, exec_y = vlm_x, vlm_y
+                    source = "vlm_correction"
+                    print(f"   🎯 VLM: ({vlm_x}, {vlm_y}) | TRM: ({trm_px}, {trm_py}) | dist={distance:.0f}px → VLM override")
+            else:
+                # VLM couldn't find target - use element matching or random
+                vlm_x, vlm_y = None, None
+                distance = None
+                distance_reward = 0.0
+                
+                # Fall back to element matching
+                action = self._generate_action(elements, embedding, step_instruction)
+                exec_x, exec_y = action["x"], action["y"]
+                source = action["source"]
+                print(f"   ⚠️ VLM target not found - using {source}: ({exec_x}, {exec_y})")
+            
+            # =========================================================
+            # PHASE 4: Execute action
+            # =========================================================
+            action_type = 0  # Click by default
+            if any(kw in step_instruction.lower() for kw in ["type", "enter", "fill", "input"]):
+                action_type = 3
+            
+            action = {
+                "x": exec_x, 
+                "y": exec_y, 
+                "action_type": action_type, 
+                "source": source, 
+                "trm_x": trm_px, 
+                "trm_y": trm_py,
+                "vlm_x": vlm_x,
+                "vlm_y": vlm_y,
+            }
+            
             await self._execute_action(action)
             await asyncio.sleep(self.config.action_delay)
-
             
-            # Capture after
+            # =========================================================
+            # PHASE 5: Capture result and compute reward
+            # =========================================================
             after_img = await self._screenshot()
             after_path = self._save_screenshot(after_img, "after")
             state_hash_after = phash_image(after_img)
             
-            # Compute reward
-            reward, success = self._compute_reward(before_img, after_img, state_hash_after)
+            # Visual change reward
+            visual_reward, visual_success = self._compute_reward(before_img, after_img, state_hash_after)
+            
+            # Combined reward: distance to VLM target + visual change
+            if distance is not None:
+                # Weighted combination
+                reward = 0.7 * distance_reward + 0.3 * visual_reward
+                success = distance < 30 or visual_success
+            else:
+                reward = visual_reward
+                success = visual_success
+            
+            # Track consecutive failures
+            if success:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
             
             status = "✓" if success else "✗"
-            print(f"   {status} reward={reward:.2f}")
+            print(f"   {status} reward={reward:.2f} (dist_r={distance_reward:.2f} vis_r={visual_reward:.2f})")
             
-            # Create experience with category tracking
+            # =========================================================
+            # PHASE 6: Store experience WITH ground truth
+            # =========================================================
             task_category = self.current_task.category.value if self.current_task else "unknown"
             task_name = self.current_task.name if self.current_task else "exploration"
             
             exp = Experience(
                 screenshot_before_path=before_path,
                 screenshot_after_path=after_path,
-                action_x=action["x"] / self.config.viewport_width,
-                action_y=action["y"] / self.config.viewport_height,
-                action_type=action["action_type"],
+                action_x=exec_x / self.config.viewport_width,   # Normalized executed action
+                action_y=exec_y / self.config.viewport_height,
+                action_type=action_type,
                 reward=reward,
                 state_hash_before=state_hash_before,
                 state_hash_after=state_hash_after,
@@ -419,11 +578,18 @@ class SandboxExplorer:
                 success=success,
                 metadata={
                     "step": step_idx,
-                    "source": action["source"],
+                    "source": source,
                     "site": self.current_site,
                     "category": task_category,
                     "task_name": task_name,
                     "success": success,
+                    # GROUND TRUTH for training
+                    "vlm_target_x": vlm_x / self.config.viewport_width if vlm_x else None,
+                    "vlm_target_y": vlm_y / self.config.viewport_height if vlm_y else None,
+                    "trm_predicted_x": trm_px / self.config.viewport_width,
+                    "trm_predicted_y": trm_py / self.config.viewport_height,
+                    "distance_to_target": distance,
+                    "distance_reward": distance_reward,
                 },
             )
 
@@ -440,6 +606,7 @@ class SandboxExplorer:
         
         self.episode_count += 1
         return experiences
+
     
     async def explore_forever(self):
         """Main exploration loop with structured curriculum."""
