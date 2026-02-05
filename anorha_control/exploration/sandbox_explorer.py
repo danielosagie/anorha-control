@@ -477,12 +477,11 @@ class SandboxExplorer:
                 # Log progress
                 if self.episode_count % 3 == 0:
                     stats = await self.db.get_stats()
-                    curriculum_stats = self.curriculum.get_stats()
                     print(f"\n📊 Progress: {stats.get('total_actions', 0)} actions, "
-                          f"{curriculum_stats['unique_tasks_completed']}/{curriculum_stats['total_task_types']} task types, "
                           f"{self.total_successes}/{self.total_actions} successes")
                 
                 # Increase difficulty after enough successes
+                curriculum_stats = self.curriculum.get_stats()
                 if curriculum_stats['total_successes'] >= 50 and self.curriculum.max_difficulty == Difficulty.EASY:
                     self.curriculum.increase_difficulty()
                 elif curriculum_stats['total_successes'] >= 200 and self.curriculum.max_difficulty == Difficulty.MEDIUM:
@@ -504,12 +503,13 @@ class SandboxExplorer:
             # Show final stats
             stats = await self.db.get_stats()
             curriculum_stats = self.curriculum.get_stats()
-            print(f"\n✅ Saved {stats.get('total_actions', 0)} experiences to {self.db._path}")
+            print(f"\n✅ Saved {stats.get('total_actions', 0)} experiences to {self.db.db_path}")
             print(f"📊 Final stats:")
             print(f"   Episodes: {self.episode_count}")
             print(f"   Success rate: {self.total_successes}/{self.total_actions}")
             print(f"   Task types completed: {curriculum_stats['unique_tasks_completed']}")
             print(f"   By category: {curriculum_stats['by_category']}")
+
 
     
     def pause(self):
