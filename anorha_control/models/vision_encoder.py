@@ -114,8 +114,15 @@ class SigLIP2Encoder(nn.Module):
         if self.use_siglip:
             inputs = self.processor(images=image, return_tensors="pt").to(self.device)
             with torch.no_grad():
-                outputs = self.model.get_image_features(**inputs)
-            return outputs
+                # SigLIP2 vision model returns BaseModelOutputWithPooling
+                # We need to extract the pooler_output tensor
+                outputs = self.model.vision_model(**inputs)
+                # Use pooler_output (768d) - the CLS token representation
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    return outputs.pooler_output
+                else:
+                    # Fallback: use mean of last hidden state
+                    return outputs.last_hidden_state.mean(dim=1)
         else:
             x = self.transform(image).unsqueeze(0).to(self.device)
             with torch.no_grad():
@@ -155,7 +162,11 @@ class SigLIP2Encoder(nn.Module):
         if self.use_siglip:
             inputs = self.processor(images=images, return_tensors="pt").to(self.device)
             with torch.no_grad():
-                return self.model.get_image_features(**inputs)
+                outputs = self.model.vision_model(**inputs)
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    return outputs.pooler_output
+                else:
+                    return outputs.last_hidden_state.mean(dim=1)
         else:
             tensors = [self.transform(img) for img in images]
             batch = torch.stack(tensors).to(self.device)
