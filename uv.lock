@@ -59,6 +59,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "gradio" },
+    { name = "huggingface-hub" },
     { name = "imagehash" },
     { name = "mss" },
     { name = "numpy" },
@@ -79,6 +80,7 @@ dependencies = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "gradio", specifier = ">=6.5.1" },
+    { name = "huggingface-hub", specifier = ">=1.4.0" },
     { name = "imagehash", specifier = ">=4.3.2" },
     { name = "mss", specifier = ">=10.1.0" },
     { name = "numpy", specifier = ">=2.4.2" },
