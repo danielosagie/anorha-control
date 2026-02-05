@@ -23,8 +23,8 @@ requests>=2.31.0
 gradio>=4.0.0
 
 # macOS overlay (pyobjc)
-pyobjc-framework-Quartz>=10.0
-pyobjc-framework-Cocoa>=10.0
+pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'
+pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'
 
 # Optional: Training on Modal (uncomment if needed)
 # modal>=0.60.0

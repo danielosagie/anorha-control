@@ -11,6 +11,9 @@ import pyautogui
 from pynput import keyboard
 
 
+import sys
+import os
+
 # Anorha green color
 ANORHA_GREEN = "#8cc63f"
 AGENT_CURSOR_RED = "#ff3b30"
@@ -18,6 +21,9 @@ AGENT_CURSOR_RED = "#ff3b30"
 
 def check_accessibility():
     """Check if accessibility permissions are granted."""
+    if sys.platform != "darwin":
+        return True # Windows/Linux don't have the same accessibility prompt model
+    
     # Try to get mouse position - if it works, we have some access
     try:
         x, y = pyautogui.position()
@@ -28,6 +34,9 @@ def check_accessibility():
 
 def request_accessibility():
     """Open System Settings to Accessibility preferences."""
+    if sys.platform != "darwin":
+        return
+
     print("\n" + "=" * 60)
     print("⚠️  ACCESSIBILITY PERMISSIONS REQUIRED")
     print("=" * 60)
@@ -84,11 +93,11 @@ class ScreenBorder:
         self.color = color
         self.width = width
         self._process: Optional[subprocess.Popen] = None
-        self._script_path = "/tmp/anorha_border.py"
+        self._script_path = os.path.join(os.path.expanduser("~"), "anorha_border.py")
     
     def _create_border_script(self):
         """Create a Python script for the border overlay."""
-        script = '''#!/usr/bin/env python3
+        script = f'''#!/usr/bin/env python3
 import tkinter as tk
 import sys
 
@@ -101,8 +110,8 @@ def create_border():
     
     # Create borderless window for each edge
     borders = []
-    border_width = 8
-    color = "#8cc63f"
+    border_width = {self.width}
+    color = "{self.color}"
     
     positions = [
         (0, 0, width, border_width),           # Top
@@ -116,9 +125,19 @@ def create_border():
         border.overrideredirect(True)  # No window decorations
         border.attributes("-topmost", True)  # Always on top
         border.attributes("-alpha", 1.0)
-        border.geometry(f"{w}x{h}+{x}+{y}")
+        border.geometry(f"{{w}}x{{h}}+{{x}}+{{y}}")
         border.configure(bg=color)
-        # Make click-through (doesn't work on all systems)
+        
+        # Transparent click-through on Windows
+        if sys.platform == "win32":
+            import ctypes
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x80000
+            WS_EX_TRANSPARENT = 0x20
+            hwnd = ctypes.windll.user32.GetParent(border.winfo_id())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+
         borders.append(border)
     
     # Keep windows alive
@@ -146,14 +165,15 @@ if __name__ == "__main__":
     def show(self):
         """Show the green border."""
         self._create_border_script()
+        python_cmd = sys.executable or "python3"
         self._process = subprocess.Popen(
-            ["python3", self._script_path],
+            [python_cmd, self._script_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         # Wait for ready signal
         time.sleep(0.5)
-        print(f"[Border] Green border activated ({ANORHA_GREEN})")
+        print(f"[Border] Green border activated ({self.color})")
     
     def hide(self):
         """Hide the border."""
@@ -166,20 +186,28 @@ if __name__ == "__main__":
 class KillSwitch:
     """Global hotkey listener for kill switch."""
     
-    def __init__(self, callback: Callable, hotkey: str = "<cmd>+<shift>+<esc>"):
+    def __init__(self, callback: Callable):
         self.callback = callback
-        self.hotkey = hotkey
+        # Cross-platform hotkey
+        if sys.platform == "darwin":
+            self.hotkey = "<cmd>+<shift>+<esc>"
+        else:
+            self.hotkey = "<ctrl>+<shift>+<esc>"
+            
         self._listener: Optional[keyboard.GlobalHotKeys] = None
     
     def start(self):
         """Start listening."""
         def on_activate():
-            print("\n🛑 KILL SWITCH (Cmd+Shift+Escape)")
+            print(f"\n🛑 KILL SWITCH ({self.hotkey})")
             self.callback()
         
-        self._listener = keyboard.GlobalHotKeys({self.hotkey: on_activate})
-        self._listener.start()
-        print(f"[KillSwitch] Listening for {self.hotkey}")
+        try:
+            self._listener = keyboard.GlobalHotKeys({self.hotkey: on_activate})
+            self._listener.start()
+            print(f"[KillSwitch] Listening for {self.hotkey}")
+        except Exception as e:
+            print(f"[KillSwitch] Warning: Could not start hotkey listener: {e}")
     
     def stop(self):
         """Stop listening."""
@@ -215,6 +243,9 @@ class ControlIndicator:
     
     def stop(self):
         """Deactivate."""
+        if not self._running:
+            return
+            
         self._running = False
         self.border.hide()
         self.kill_switch.stop()
@@ -235,7 +266,7 @@ def get_indicator(on_kill: Callable = None) -> ControlIndicator:
 
 # Quick test
 if __name__ == "__main__":
-    print("Testing Overlay + Cursor Indicator...")
+    print(f"Testing Overlay on {sys.platform}...")
     
     def on_kill():
         print("Killed!")
@@ -245,8 +276,11 @@ if __name__ == "__main__":
     
     # Show some click indicators
     for i in range(3):
-        x, y = pyautogui.position()
-        indicator.show_click(x + i * 50, y)
-        time.sleep(1)
+        try:
+            x, y = pyautogui.position()
+            indicator.show_click(x + i * 50, y)
+            time.sleep(1)
+        except KeyboardInterrupt:
+            break
     
     indicator.stop()
