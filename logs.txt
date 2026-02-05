@@ -1,0 +1,136 @@
+danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
+$ uv run python -m anorha_control.main explore --headless --planner-model qwen2.5-vl:7b
+============================================================
+🖱️  ANORHA-CONTROL: Real Mouse Explorer
+============================================================
+Device: cpu
+
+Loading vision encoder...
+  Vision encoder: 256d output
+Loading TRM...
+  TRM: 2,299,144 params
+
+Database: data\experiences.db
+
+Config:
+  Epsilon: 0.3
+  Steps per episode: 10
+
+⚠️  WARNING: This will control your REAL mouse!
+   Press Cmd+Shift+Escape at any time to STOP
+   Press Cmd+Shift+P to PAUSE/RESUME
+
+   Starting in 3 seconds...
+
+Initializing planner: qwen2.5-vl:7b
+
+🔒 Running in SANDBOX mode - your mouse is free!
+
+============================================================
+🔒 ANORHA-CONTROL: Sandbox Explorer Active
+   Browser-only mode - your mouse is free!
+   Press Cmd+Shift+Escape to stop
+   Press Cmd+Shift+P to pause/resume
+============================================================
+[Border] Green border activated (#8cc63f)
+[KillSwitch] Listening for <ctrl>+<shift>+<esc>
+[PauseSwitch] Listening for <ctrl>+<shift>+p
+
+📊 Training Estimates:
+   Basic proficiency: 10,000-20,000 experiences
+   High accuracy: 50,000-100,000 experiences
+[Sandbox] Browser initialized
+[Sandbox] Navigated to: https://www.saucedemo.com/
+
+📍 Episode 1
+   Site: https://www.saucedemo.com/
+   Task: Login with username 'standard_user' and password 'secret_sauce'
+   🧠 VLM Planning...
+   📝 Plan: ['username field', 'username field', 'password field']...
+
+   Step 1/10: click username field
+   🤖 TRM: (764, 393) | Action: (640, 173) [input_match]
+   ⌨️ Type 'test@example.com' @ (640, 173)
+   ✗ reward=0.30
+
+   Step 2/10: type username field
+   🤖 TRM: (490, 269) | Action: (640, 173) [random]
+   🖱️ Click @ (640, 173)
+   ✗ reward=0.30
+
+   Step 3/10: click password field
+   🤖 TRM: (1030, 374) | Action: (640, 227) [input_match]
+   ⌨️ Type 'hello world' @ (640, 227)
+   ✗ reward=0.00
+
+   Step 4/10: type password field
+   🤖 TRM: (777, 452) | Action: (640, 227) [input_match]
+   ⌨️ Type 'John Doe' @ (640, 227)
+   ✗ reward=0.00
+
+   Step 5/10: click login button
+   🤖 TRM: (897, 246) | Action: (640, 326) [text_match]
+   🖱️ Click @ (640, 326)
+   ✗ reward=0.30
+
+   Step 6/10: Login with username 'standard_user' and password 'secret_sauce'
+   🤖 TRM: (873, 193) | Action: (640, 326) [random]
+   ⌨️ Type 'test@example.com' @ (640, 326)
+   ✗ reward=0.30
+
+   Step 7/10: Login with username 'standard_user' and password 'secret_sauce'
+   🤖 TRM: (645, 331) | Action: (640, 173) [random]
+   📜 Scroll down
+   ✗ reward=0.00
+
+   Step 8/10: Login with username 'standard_user' and password 'secret_sauce'
+   🤖 TRM: (477, 139) | Action: (640, 227) [input_match]
+   ⌨️ Type 'John Doe' @ (640, 227)
+   ✗ reward=0.00
+
+   Step 9/10: Login with username 'standard_user' and password 'secret_sauce'
+   🤖 TRM: (983, 203) | Action: (640, 227) [input_match]
+   ⌨️ Type 'test@example.com' @ (640, 227)
+   ✗ reward=0.00
+
+   Step 10/10: Login with username 'standard_user' and password 'secret_sauce'
+   🤖 TRM: (796, 233) | Action: (640, 227) [input_match]
+   ⌨️ Type 'New York' @ (640, 227)
+   ✗ reward=0.00
+
+❌ Error: cannot access local variable 'curriculum_stats' where it is not associated with a value
+Traceback (most recent call last):
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 486, in explore_forever
+    if curriculum_stats['total_successes'] >= 50 and self.curriculum.max_difficulty == Difficulty.EASY:
+       ^^^^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'curriculum_stats' where it is not associated with a value
+[Border] Green border deactivated
+
+✅ Data saved to: D:\danie\Documents\Code Projects\anorha-control\data\experiences.db
+📊 Final stats:
+  Total actions: 1325
+  Successes: 166
+  Unique states: 0
+  Success rate: 12.5%
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 303, in <module>
+    main()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 295, in main
+    asyncio.run(run_explore(args))
+  File "C:\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\asyncio\base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 124, in run_explore
+    await explorer.explore_forever()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 507, in explore_forever
+    print(f"\n✅ Saved {stats.get('total_actions', 0)} experiences to {self.db._path}")
+                                                                       ^^^^^^^^^^^^^
+AttributeError: 'ExperienceDB' object has no attribute '_path'. Did you mean: 'db_path'?
