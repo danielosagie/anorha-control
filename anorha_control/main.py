@@ -35,12 +35,25 @@ async def run_explore(args):
     
     # Load models
     print("\nLoading vision encoder...")
-    vision = load_vision_encoder(device=device)
-    print(f"  Vision encoder: {vision.output_dim}d output")
+    # Use SigLIP2 by default (768d), fallback to mobilevit (256d) with --legacy-vision
+    use_siglip = not getattr(args, 'legacy_vision', False)
+    temporal_frames = getattr(args, 'temporal_frames', 0)
+    
+    vision = load_vision_encoder(
+        model_type="siglip2" if use_siglip else "mobilevit",
+        temporal_frames=temporal_frames,
+        device=device
+    )
+    print(f"  Vision encoder: {vision.output_dim}d output (temporal={temporal_frames})")
     
     print("Loading TRM...")
     checkpoint_path = args.checkpoint if args.checkpoint else None
-    trm = load_trm(checkpoint_path=checkpoint_path, device=device)
+    trm = load_trm(
+        checkpoint_path=checkpoint_path, 
+        device=device,
+        vision_dim=vision.output_dim,  # Match vision encoder output
+        hidden_dim=512 if use_siglip else 256,  # Larger hidden for SigLIP2
+    )
     print(f"  TRM: {sum(p.numel() for p in trm.parameters()):,} params")
     
     # Database
@@ -274,7 +287,8 @@ def main():
     explore_parser.add_argument("--planner-model", type=str, default="qwen3-vl:2b", help="VL model for planning")
     explore_parser.add_argument("--headless", action="store_true", help="Run in sandboxed browser mode (doesn't control your mouse)")
     explore_parser.add_argument("--with-dashboard", action="store_true", help="Launch Gradio dashboard in background")
-
+    explore_parser.add_argument("--legacy-vision", action="store_true", help="Use legacy MobileViTV2 encoder (256d) instead of SigLIP2 (768d)")
+    explore_parser.add_argument("--temporal-frames", type=int, default=0, help="Number of frames for temporal video context (0=single image)")
 
     
     # Train command

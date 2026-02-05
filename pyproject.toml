@@ -22,6 +22,6 @@ dependencies = [
     "timm>=1.0.24",
     "torch>=2.5.0",
     "torchvision>=0.20.0",
-    "playwright>=1.40.0",
+    "transformers>=4.48.0",  # For SigLIP2
 ]
 
