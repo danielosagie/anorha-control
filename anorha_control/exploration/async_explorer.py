@@ -42,6 +42,9 @@ class ExplorationConfig:
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
 
 
+from ..models.local_llm import LocalLLM, TaskPlanner, TaskStep
+
+
 class RealMouseExplorer:
     """
     Autonomous explorer that controls the REAL mouse cursor.
@@ -54,11 +57,13 @@ class RealMouseExplorer:
         trm: TRM,
         db: ExperienceDB,
         config: ExplorationConfig = None,
+        planner: TaskPlanner = None,
     ):
         self.vision_encoder = vision_encoder
         self.trm = trm
         self.db = db
         self.config = config or ExplorationConfig()
+        self.planner = planner or TaskPlanner(LocalLLM())
         
         # Browser and task session
         self.session = ExplorationSession(sites=self.config.sites)
@@ -83,6 +88,7 @@ class RealMouseExplorer:
         # Current task
         self.current_task = None
         self.current_instruction = "explore the page"
+        self.current_plan: List[TaskStep] = []
         
         # Control
         self._running = False
@@ -96,6 +102,8 @@ class RealMouseExplorer:
         print("\n🛑 Kill switch triggered!")
         self._killed = True
         self._running = False
+        if hasattr(self, 'session'):
+            self.session.browser.close()
     
     def _save_screenshot(self, image: Image.Image, prefix: str) -> str:
         """Save screenshot and return path."""
@@ -219,26 +227,45 @@ class RealMouseExplorer:
         experiences = []
         screen_size = self.screen.screen_size
         
-        # Get current task
-        task_str = self.current_instruction
+        # Get current high-level instruction
+        base_instruction = self.current_instruction
         
         print(f"\n📍 Episode {self.episode_count + 1}")
-        print(f"   Task: {task_str}")
+        print(f"   Task: {base_instruction}")
         
-        for step in range(self.config.max_episode_steps):
+        # Dynamic planning if LocalLLM has vision (Qwen3-VL)
+        current_plan = []
+        if self.planner and self.planner.llm.available:
+            print("   🧠 Planning with VLM...")
+            # Capture current screen for planning
+            planning_img = self.screen.capture()
+            current_plan = self.planner.plan_task_with_vision(base_instruction, planning_img)
+            if current_plan:
+                print(f"   📝 Plan: {[s.target for s in current_plan]}")
+        
+        max_steps = max(self.config.max_episode_steps, len(current_plan))
+        
+        for step_idx in range(max_steps):
             if self._killed:
                 break
             
-            print(f"   Step {step + 1}/{self.config.max_episode_steps}")
+            # Determine effective instruction for this step
+            if step_idx < len(current_plan):
+                current_step = current_plan[step_idx]
+                step_instruction = f"{current_step.action} {current_step.target}"
+                print(f"   Step {step_idx + 1}/{max_steps}: {step_instruction}")
+            else:
+                step_instruction = base_instruction
+                print(f"   Step {step_idx + 1}/{max_steps} (exploring)")
             
             # Capture before state
             before_img, before_emb, state_hash_before = self._capture_state()
-            before_path = self._save_screenshot(before_img, "before")
+            before_path = self._save_screenshot(before_img, "before_v")
             
             # Detect UI elements
             elements = detect_ui_elements(before_img)
             
-            # Generate action
+            # Generate action (TRM uses step_instruction for precise refinement)
             action = self._generate_action(before_emb, elements, state_hash_before)
             
             # Execute action with REAL mouse
@@ -249,7 +276,7 @@ class RealMouseExplorer:
             
             # Capture after state
             after_img, after_emb, state_hash_after = self._capture_state()
-            after_path = self._save_screenshot(after_img, "after")
+            after_path = self._save_screenshot(after_img, "after_v")
             
             # Compute reward
             reward, success = self._compute_reward(before_img, after_img, state_hash_after)
@@ -257,7 +284,7 @@ class RealMouseExplorer:
             status = "✓" if success else "✗"
             print(f"   {status} reward={reward:.2f}")
             
-            # Create experience with instruction
+            # Create experience with specific step instruction
             exp = Experience(
                 screenshot_before_path=before_path,
                 screenshot_after_path=after_path,
@@ -267,42 +294,27 @@ class RealMouseExplorer:
                 reward=reward,
                 state_hash_before=state_hash_before,
                 state_hash_after=state_hash_after,
-                instruction=task_str,  # Store the task instruction
+                instruction=step_instruction,  # Store the granular instruction
                 success=success,
-                metadata={"step": step, "elements_count": len(elements), "source": action["source"]},
+                metadata={
+                    "step": step_idx, 
+                    "elements_count": len(elements), 
+                    "source": action["source"],
+                    "base_instruction": base_instruction
+                },
             )
             experiences.append(exp)
             
             # Track state
             self.states_visited.add(state_hash_before)
-            action_hash = f"{action['x']:.2f}_{action['y']:.2f}"
-            if state_hash_before not in self.actions_tried:
-                self.actions_tried[state_hash_before] = set()
-            self.actions_tried[state_hash_before].add(action_hash)
+            
+            # Store in database
+            await self.db.add_experience(exp)
             
             # Update counts
             self.total_actions += 1
             if success:
                 self.total_successes += 1
-            
-            # Store in database
-            await self.db.add_experience(exp)
-            
-            # Add to buffer and queue
-            self.experience_buffer.append(exp)
-            try:
-                self.training_queue.put_nowait(exp)
-            except queue.Full:
-                pass
-            
-            # Update knowledge
-            await self.db.update_knowledge(state_hash_before, {
-                "action": {"x": action["x"], "y": action["y"], "type": action["action_type"]},
-                "outcome": state_hash_after,
-                "reward": reward,
-                "success": success,
-                "instruction": task_str,
-            })
         
         self.episode_count += 1
         return experiences

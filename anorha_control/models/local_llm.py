@@ -9,6 +9,9 @@ import time
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 import requests
+from PIL import Image
+import io
+import base64
 
 
 @dataclass
@@ -56,29 +59,20 @@ class LocalLLM:
         self,
         prompt: str,
         system: str = None,
+        images: Optional[List[str]] = None,  # Base64 encoded images
         temperature: float = 0.3,
         max_tokens: int = 256,
-        thinking: bool = False,  # Use non-thinking mode for speed
+        thinking: bool = False,
     ) -> str:
         """
-        Generate text from the LLM.
-        
-        Args:
-            prompt: User prompt
-            system: System prompt
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            thinking: Enable thinking mode (slower but better reasoning)
-            
-        Returns:
-            Generated text
+        Generate text from the LLM, optionally with vision.
         """
         if not self.available:
             return ""
         
-        # Add thinking control to prompt
+        # Add thinking control to prompt if supported
         if not thinking:
-            prompt = prompt + "\n\n/no_think"  # Qwen3 non-thinking mode
+            prompt = prompt + "\n\n/no_think"
         
         payload = {
             "model": self.model,
@@ -93,6 +87,9 @@ class LocalLLM:
         if system:
             payload["system"] = system
         
+        if images:
+            payload["images"] = images
+            
         try:
             response = requests.post(
                 f"{self.base_url}/api/generate",
@@ -107,6 +104,61 @@ class LocalLLM:
             print(f"[LocalLLM] Error: {e}")
         
         return ""
+    
+    def plan_task_with_vision(
+        self, 
+        instruction: str, 
+        screenshot: Image.Image
+    ) -> List[TaskStep]:
+        """
+        Plan a task using the VLM's vision capabilities.
+        
+        Args:
+            instruction: What to do
+            screenshot: PIL Image of the current screen
+            
+        Returns:
+            List of TaskStep objects
+        """
+        # Convert PIL to base64
+        buffered = io.BytesIO()
+        screenshot.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
+        system = """You are a GUI automation assistant with vision. 
+Analyze the image and the task. Output a JSON array of steps.
+Each step has: action (click/type/scroll/wait), target (description of what to interact with), value (for type), reason.
+Be extremely precise based on the visual evidence.
+Output ONLY valid JSON."""
+
+        prompt = f"Analyze this screen and plan the task: {instruction}"
+        
+        response = self.generate(
+            prompt, 
+            system=system, 
+            images=[img_base64], 
+            temperature=0.1
+        )
+        
+        # Parse JSON
+        try:
+            start = response.find("[")
+            end = response.rfind("]") + 1
+            if start >= 0 and end > start:
+                steps_json = json.loads(response[start:end])
+                return [
+                    TaskStep(
+                        action=s.get("action", "click"),
+                        target=s.get("target"),
+                        value=s.get("value"),
+                        reason=s.get("reason", ""),
+                    )
+                    for s in steps_json
+                ]
+        except json.JSONDecodeError:
+            print(f"[LocalLLM] Failed to parse steps from: {response[:100]}...")
+            
+        return []
     
     def plan_task(self, instruction: str, screen_description: str = "") -> List[TaskStep]:
         """

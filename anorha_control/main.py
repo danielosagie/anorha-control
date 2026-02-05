@@ -68,8 +68,18 @@ async def run_explore(args):
     
     await asyncio.sleep(3)
     
+    from anorha_control.models.local_llm import LocalLLM, TaskPlanner
+    
+    # ... (skipping some loading)
+    
+    # Planner (VLM)
+    planner_model = args.planner_model or "qwen3-vl:2b"
+    print(f"\nInitializing planner: {planner_model}")
+    llm = LocalLLM(model=planner_model)
+    planner = TaskPlanner(llm)
+    
     # Create explorer
-    explorer = RealMouseExplorer(vision, trm, db, exp_config)
+    explorer = RealMouseExplorer(vision, trm, db, exp_config, planner=planner)
     
     # Create trainer (if concurrent training enabled)
     trainer = None
@@ -233,6 +243,7 @@ def main():
     explore_parser.add_argument("--steps", type=int, default=10, help="Steps per episode")
     explore_parser.add_argument("--db", type=str, help="Database path")
     explore_parser.add_argument("--checkpoint", type=str, help="Load TRM checkpoint")
+    explore_parser.add_argument("--planner-model", type=str, default="qwen3-vl:2b", help="VL model for planning")
     
     # Train command
     train_parser = subparsers.add_parser("train", help="Train on collected experiences")
