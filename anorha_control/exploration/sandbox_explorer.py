@@ -25,6 +25,7 @@ from ..models.strategic_planner import StrategicPlanner, PlanStep
 from ..utils.hashing import phash_image
 from ..knowledge.database import ExperienceDB, Experience
 from .task_curriculum import TaskCurriculum, Task, TaskCategory, Difficulty
+from ..utils.overlay import get_indicator
 
 
 @dataclass
@@ -100,12 +101,28 @@ class SandboxExplorer:
         self.current_site = None
         self.current_instruction = "explore the page"
         
-        # Control
+        # Control & Overlay
         self._running = False
         self._paused = False
+        self._killed = False
+        
+        # Visual overlay for hotkeys/status
+        self.indicator = get_indicator(on_kill=self._on_kill, on_pause=self._on_pause)
         
         # Training queue for async trainer
         self.training_queue = queue.Queue()
+    
+    def _on_kill(self):
+        """Handle kill switch activation."""
+        print("\n🛑 Kill switch triggered!")
+        self._killed = True
+        self._running = False
+        # Browser cleanup happens in stop()
+    
+    def _on_pause(self, paused: bool):
+        """Handle pause toggle."""
+        self._paused = paused
+
 
     
     async def _init_browser(self):
@@ -407,11 +424,16 @@ class SandboxExplorer:
         print("\n" + "=" * 60)
         print("🔒 ANORHA-CONTROL: Sandbox Explorer Active")
         print("   Browser-only mode - your mouse is free!")
-        print("   Press Ctrl+C to stop")
+        print("   Press Cmd+Shift+Escape to stop")
+        print("   Press Cmd+Shift+P to pause/resume")
         print("=" * 60)
+        
+        # Start visual overlay and hotkeys
+        self.indicator.start()
         
         # Show training estimates
         estimates = self.curriculum.get_training_estimate()
+
         print(f"\n📊 Training Estimates:")
         print(f"   Basic proficiency: {estimates['basic_proficiency']['experiences']} experiences")
         print(f"   High accuracy: {estimates['high_accuracy']['experiences']} experiences")
@@ -476,6 +498,8 @@ class SandboxExplorer:
             traceback.print_exc()
         finally:
             await self._close_browser()
+            self.indicator.stop()
+
             
             # Show final stats
             stats = await self.db.get_stats()
