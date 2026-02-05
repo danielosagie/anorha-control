@@ -18,11 +18,11 @@ from typing import Optional, List
 from collections import deque
 
 # Try to import transformers for SigLIP2
+HAS_TRANSFORMERS = False
 try:
-    from transformers import AutoProcessor, AutoModel
+    from transformers import AutoImageProcessor, AutoModel
     HAS_TRANSFORMERS = True
 except ImportError:
-    HAS_TRANSFORMERS = False
     print("[Vision] Warning: transformers not installed, falling back to timm")
 
 import timm
@@ -52,23 +52,31 @@ class SigLIP2Encoder(nn.Module):
         self.device = device
         self.temporal_buffer_size = temporal_buffer_size
         self.frozen = freeze
+        self.use_siglip = False
         
         if HAS_TRANSFORMERS:
-            print(f"[Vision] Loading SigLIP2: {model_name}")
-            self.processor = AutoProcessor.from_pretrained(model_name)
-            self.model = AutoModel.from_pretrained(model_name).to(device)
-            self.output_dim = self.model.config.vision_config.hidden_size  # 768 for base
-            self.use_siglip = True
-        else:
+            try:
+                print(f"[Vision] Loading SigLIP2: {model_name}")
+                # Use AutoImageProcessor (NOT AutoProcessor which requires tokenizer)
+                self.processor = AutoImageProcessor.from_pretrained(model_name)
+                self.model = AutoModel.from_pretrained(model_name).to(device)
+                self.output_dim = self.model.config.vision_config.hidden_size  # 768 for base
+                self.use_siglip = True
+                print(f"[Vision] SigLIP2 loaded successfully: {self.output_dim}d")
+            except Exception as e:
+                print(f"[Vision] SigLIP2 load failed: {e}")
+                print("[Vision] Falling back to CLIP ViT-B/16")
+        
+        if not self.use_siglip:
             # Fallback to timm CLIP
-            print("[Vision] Falling back to timm ViT-B/16")
+            print("[Vision] Using timm ViT-B/16 (CLIP)")
             self.model = timm.create_model(
                 "vit_base_patch16_clip_224",
                 pretrained=True,
                 num_classes=0,
             ).to(device)
             self.output_dim = 768
-            self.use_siglip = False
+            self.processor = None
             
             self.transform = transforms.Compose([
                 transforms.Resize((224, 224)),
