@@ -281,6 +281,20 @@ class TaskPlanner:
         
         # Default: just click
         return [TaskStep("click", instruction, reason="Execute instruction")]
+    
+    def plan_task_with_vision(self, instruction: str, screenshot: Image.Image) -> List[TaskStep]:
+        """
+        Plan a task using vision.
+        Delegates to LLM if available, otherwise falls back to rules.
+        """
+        if self.llm and self.llm.available:
+            steps = self.llm.plan_task_with_vision(instruction, screenshot)
+            if steps:
+                return steps
+        
+        # Fall back to rule-based
+        return self._rule_based_plan(instruction)
+
 
 
 # CLI for testing
