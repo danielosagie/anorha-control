@@ -31,7 +31,7 @@ class StrategicPlanner:
     
     def __init__(
         self,
-        model: str = "glm-4.7-flash:q4_K_M",
+        model: str = "glm-4.7-flash:latest",
         base_url: str = "http://localhost:11434",
         timeout: float = 60.0,  # GLM needs more time
     ):

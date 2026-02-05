@@ -31,7 +31,7 @@ class LocalLLM:
     
     def __init__(
         self,
-        model: str = "qwen3:0.6b",
+        model: str = "qwen3-vl:4b",
         base_url: str = "http://localhost:11434",
         timeout: float = 30.0,
     ):
