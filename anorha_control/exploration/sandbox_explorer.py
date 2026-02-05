@@ -164,14 +164,27 @@ class SandboxExplorer:
         image.save(path)
         return str(path)
     
-    async def _navigate(self, url: str):
-        """Navigate to URL."""
+    async def _navigate(self, url: str) -> bool:
+        """Navigate to URL with robust error handling.
+        
+        Returns:
+            True if navigation succeeded, False otherwise
+        """
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
             self.current_site = url
             print(f"[Sandbox] Navigated to: {url}")
+            return True
         except Exception as e:
-            print(f"[Sandbox] Navigation error: {e}")
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                print(f"[Sandbox] ⚠️ Timeout navigating to {url} - skipping")
+            elif "net::" in error_msg.lower():
+                print(f"[Sandbox] ⚠️ Network error for {url} - skipping")
+            else:
+                print(f"[Sandbox] ⚠️ Navigation error: {e}")
+            return False
+
     
     async def _get_clickable_elements(self) -> List[Dict[str, Any]]:
         """Get all clickable elements with their positions."""
@@ -453,9 +466,15 @@ class SandboxExplorer:
                     objective = "explore the page and interact with elements"
                     max_steps = self.config.max_episode_steps
                 
-                # Navigate to task site
-                await self._navigate(site)
+                # Navigate to task site (skip if fails)
+                nav_success = await self._navigate(site)
+                if not nav_success:
+                    print(f"   ⏭️ Skipping task due to navigation failure")
+                    await asyncio.sleep(1)
+                    continue
+                    
                 self.current_instruction = objective
+
                 
                 # Strategic planning for complex tasks
                 if self.strategic_planner and self.current_task:

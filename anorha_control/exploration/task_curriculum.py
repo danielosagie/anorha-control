@@ -121,47 +121,63 @@ PRECISION_TASKS = [
 
 
 # =============================================================================
-# TYPING TASKS - Speed and accuracy
+# TYPING TASKS - Speed and accuracy (Sandbox-compatible only)
+# NOTE: Real-time typing sites (TypeRacer, MonkeyType, 10FastFingers) have
+#       anti-bot detection and require real keyboard timing - they don't work
+#       reliably with Playwright's simulated typing. Use form-based typing instead.
 # =============================================================================
 
 TYPING_TASKS = [
+    # Form-based typing (works with Playwright)
     Task(
-        name="TypeRacer - Racing",
-        category=TaskCategory.TYPING,
-        difficulty=Difficulty.MEDIUM,
-        site="https://play.typeracer.com/",
-        objective="Type the displayed text as fast as possible to win the race",
-        success_hints=["Race started", "Characters typed", "WPM displayed", "Progress bar moving"],
-        max_steps=100,
-    ),
-    Task(
-        name="10FastFingers - Typing Test",
-        category=TaskCategory.TYPING,
-        difficulty=Difficulty.MEDIUM,
-        site="https://10fastfingers.com/typing-test/english",
-        objective="Type words correctly within the time limit",
-        success_hints=["Word correct", "Next word highlighted", "WPM counter"],
-        max_steps=80,
-    ),
-    Task(
-        name="Typing.com - Lessons",
+        name="DemoQA - Text Box Entry",
         category=TaskCategory.TYPING,
         difficulty=Difficulty.EASY,
-        site="https://www.typing.com/student/lessons",
-        objective="Complete typing lessons with high accuracy",
-        success_hints=["Key pressed", "Progress updated", "Accuracy shown"],
-        max_steps=60,
+        site="https://demoqa.com/text-box",
+        objective="Fill in name, email, current address, and permanent address",
+        success_hints=["Form filled", "Output displayed", "Data shown"],
+        max_steps=15,
+        sample_data={"name": "John Doe", "email": "john@example.com", "address": "123 Main St"},
     ),
     Task(
-        name="MonkeyType - Speed Test",
+        name="The Internet - Text Input",
         category=TaskCategory.TYPING,
-        difficulty=Difficulty.HARD,
-        site="https://monkeytype.com/",
-        objective="Achieve 60+ WPM with 95%+ accuracy",
-        success_hints=["Word typed", "WPM updating", "Accuracy percentage"],
-        max_steps=100,
+        difficulty=Difficulty.EASY,
+        site="http://the-internet.herokuapp.com/inputs",
+        objective="Type numbers into the input field",
+        success_hints=["Number entered", "Input updated"],
+        max_steps=8,
+    ),
+    Task(
+        name="UI Playground - Text Input",
+        category=TaskCategory.TYPING,
+        difficulty=Difficulty.EASY,
+        site="http://uitestingplayground.com/textinput",
+        objective="Type a new button name and click the button to change its text",
+        success_hints=["Button text changed", "Input accepted"],
+        max_steps=8,
+        sample_data={"button_name": "Anorha Rocks"},
+    ),
+    Task(
+        name="Expand Testing - Textarea",
+        category=TaskCategory.TYPING,
+        difficulty=Difficulty.MEDIUM,
+        site="https://practice.expandtesting.com/inputs",
+        objective="Fill out various input types including textarea",
+        success_hints=["Text entered", "Form filled"],
+        max_steps=15,
+    ),
+    Task(
+        name="W3Schools - Input Form",
+        category=TaskCategory.TYPING,
+        difficulty=Difficulty.EASY,
+        site="https://www.w3schools.com/html/tryit.asp?filename=tryhtml_form_submit",
+        objective="Type into the name and submit the form in the iframe",
+        success_hints=["Form submitted", "Input accepted"],
+        max_steps=10,
     ),
 ]
+
 
 
 # =============================================================================
