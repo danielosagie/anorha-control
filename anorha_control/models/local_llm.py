@@ -33,11 +33,18 @@ class LocalLLM:
         self,
         model: str = "qwen3-vl:4b",
         base_url: str = "http://localhost:11434",
-        timeout: float = 30.0,
+        timeout: float = 120.0,  # Increased for large models on CPU
     ):
         self.model = model
         self.base_url = base_url
-        self.timeout = timeout
+        
+        # Auto-detect large models and increase timeout
+        if any(size in model.lower() for size in ["7b", "8b", "13b", "19b", "70b", "latest"]):
+            self.timeout = max(timeout, 180.0)  # 3 minutes for large models
+            print(f"[LocalLLM] Large model detected, timeout={self.timeout}s")
+        else:
+            self.timeout = timeout
+        
         self._available: Optional[bool] = None
     
     @property

@@ -33,7 +33,7 @@ class StrategicPlanner:
         self,
         model: str = "glm-4.7-flash:latest",
         base_url: str = "http://localhost:11434",
-        timeout: float = 60.0,  # GLM needs more time
+        timeout: float = 180.0,  # GLM 19GB needs more time especially on CPU
     ):
         self.model = model
         self.base_url = base_url
