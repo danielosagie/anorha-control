@@ -1,0 +1,267 @@
+"""
+Local LLM integration via Ollama.
+Uses Qwen3-0.6B for fast local task planning.
+Falls back to rule-based planning if Ollama unavailable.
+"""
+import subprocess
+import json
+import time
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+import requests
+
+
+@dataclass
+class TaskStep:
+    """A single step in a task plan."""
+    action: str  # click, type, scroll, wait
+    target: Optional[str] = None  # What to target (button, field, etc.)
+    value: Optional[str] = None  # Value to type
+    reason: str = ""  # Why this step
+
+
+class LocalLLM:
+    """
+    Local LLM client using Ollama.
+    Optimized for speed with non-thinking mode.
+    """
+    
+    def __init__(
+        self,
+        model: str = "qwen3:0.6b",
+        base_url: str = "http://localhost:11434",
+        timeout: float = 30.0,
+    ):
+        self.model = model
+        self.base_url = base_url
+        self.timeout = timeout
+        self._available: Optional[bool] = None
+    
+    @property
+    def available(self) -> bool:
+        """Check if Ollama is available."""
+        if self._available is None:
+            self._available = self._check_available()
+        return self._available
+    
+    def _check_available(self) -> bool:
+        """Check if Ollama server is running."""
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def generate(
+        self,
+        prompt: str,
+        system: str = None,
+        temperature: float = 0.3,
+        max_tokens: int = 256,
+        thinking: bool = False,  # Use non-thinking mode for speed
+    ) -> str:
+        """
+        Generate text from the LLM.
+        
+        Args:
+            prompt: User prompt
+            system: System prompt
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            thinking: Enable thinking mode (slower but better reasoning)
+            
+        Returns:
+            Generated text
+        """
+        if not self.available:
+            return ""
+        
+        # Add thinking control to prompt
+        if not thinking:
+            prompt = prompt + "\n\n/no_think"  # Qwen3 non-thinking mode
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            }
+        }
+        
+        if system:
+            payload["system"] = system
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json=payload,
+                timeout=self.timeout,
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("response", "").strip()
+        except Exception as e:
+            print(f"[LocalLLM] Error: {e}")
+        
+        return ""
+    
+    def plan_task(self, instruction: str, screen_description: str = "") -> List[TaskStep]:
+        """
+        Plan a task given an instruction.
+        
+        Args:
+            instruction: What to do (e.g., "log into email")
+            screen_description: Optional description of current screen
+            
+        Returns:
+            List of TaskStep objects
+        """
+        system = """You are a GUI automation assistant. Given a task, output a JSON array of steps.
+Each step has: action (click/type/scroll/wait), target (what to interact with), value (for type), reason.
+Be concise. Output ONLY valid JSON, no explanation."""
+
+        prompt = f"Task: {instruction}"
+        if screen_description:
+            prompt += f"\n\nScreen: {screen_description}"
+        
+        prompt += "\n\nOutput steps as JSON array:"
+        
+        response = self.generate(prompt, system=system, temperature=0.1)
+        
+        # Parse JSON
+        try:
+            # Find JSON array in response
+            start = response.find("[")
+            end = response.rfind("]") + 1
+            if start >= 0 and end > start:
+                steps_json = json.loads(response[start:end])
+                return [
+                    TaskStep(
+                        action=s.get("action", "click"),
+                        target=s.get("target"),
+                        value=s.get("value"),
+                        reason=s.get("reason", ""),
+                    )
+                    for s in steps_json
+                ]
+        except json.JSONDecodeError:
+            pass
+        
+        return []
+    
+    def describe_screen(self, elements: List[Dict[str, Any]]) -> str:
+        """
+        Generate a description of the screen given detected elements.
+        
+        Args:
+            elements: List of detected UI elements
+            
+        Returns:
+            Natural language description
+        """
+        if not elements:
+            return "Screen with no detected elements"
+        
+        # Summarize elements
+        element_types = {}
+        for el in elements:
+            el_type = el.get("type", "element")
+            element_types[el_type] = element_types.get(el_type, 0) + 1
+        
+        summary = ", ".join(f"{count} {t}s" for t, count in element_types.items())
+        return f"Screen with {summary}"
+
+
+class TaskPlanner:
+    """
+    Plans tasks using LLM or rule-based fallback.
+    """
+    
+    def __init__(self, llm: Optional[LocalLLM] = None):
+        self.llm = llm or LocalLLM()
+        
+        # Rule-based templates
+        self._templates = {
+            "login": [
+                TaskStep("click", "username field", reason="Focus on username"),
+                TaskStep("type", "username field", reason="Enter username"),
+                TaskStep("click", "password field", reason="Focus on password"),
+                TaskStep("type", "password field", reason="Enter password"),
+                TaskStep("click", "login button", reason="Submit login"),
+            ],
+            "search": [
+                TaskStep("click", "search field", reason="Focus on search"),
+                TaskStep("type", "search field", reason="Enter search query"),
+                TaskStep("click", "search button", reason="Submit search"),
+            ],
+            "scroll": [
+                TaskStep("scroll", "page", reason="Scroll to see more content"),
+            ],
+            "click": [
+                TaskStep("click", "target element", reason="Click the target"),
+            ],
+        }
+    
+    def plan(self, instruction: str, screen_description: str = "") -> List[TaskStep]:
+        """
+        Create a plan for the given instruction.
+        Uses LLM if available, otherwise falls back to rules.
+        """
+        # Try LLM first
+        if self.llm and self.llm.available:
+            steps = self.llm.plan_task(instruction, screen_description)
+            if steps:
+                return steps
+        
+        # Fall back to rule-based
+        return self._rule_based_plan(instruction)
+    
+    def _rule_based_plan(self, instruction: str) -> List[TaskStep]:
+        """Simple rule-based planning."""
+        instruction_lower = instruction.lower()
+        
+        for keyword, template in self._templates.items():
+            if keyword in instruction_lower:
+                return template
+        
+        # Default: just click
+        return [TaskStep("click", instruction, reason="Execute instruction")]
+
+
+# CLI for testing
+if __name__ == "__main__":
+    print("Testing LocalLLM + TaskPlanner...")
+    
+    llm = LocalLLM()
+    print(f"Ollama available: {llm.available}")
+    
+    if llm.available:
+        # Test generation
+        print("\n--- Generation Test ---")
+        start = time.time()
+        response = llm.generate("What is 2+2? Answer briefly.")
+        elapsed = time.time() - start
+        print(f"Response ({elapsed:.2f}s): {response}")
+        
+        # Test task planning
+        print("\n--- Task Planning Test ---")
+        start = time.time()
+        steps = llm.plan_task("Log into my Gmail account")
+        elapsed = time.time() - start
+        print(f"Planned in {elapsed:.2f}s:")
+        for i, step in enumerate(steps, 1):
+            print(f"  {i}. {step.action} -> {step.target}: {step.reason}")
+    else:
+        print("\nOllama not available. Testing rule-based fallback...")
+    
+    # Test planner with fallback
+    planner = TaskPlanner(llm)
+    print("\n--- Planner Test ---")
+    for task in ["login to the website", "search for python tutorials", "scroll down"]:
+        steps = planner.plan(task)
+        print(f"\nTask: {task}")
+        for step in steps:
+            print(f"  - {step.action}: {step.target}")
