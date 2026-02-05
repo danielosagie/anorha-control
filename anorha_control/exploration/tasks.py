@@ -109,10 +109,15 @@ def generate_task_batch(n: int = 10) -> List[ExplorationTask]:
     return [generate_task() for _ in range(n)]
 
 
+import sys
+import webbrowser
+
+
 class BrowserLauncher:
     """
     Launches and manages browser windows for exploration.
     Uses the system default browser via command line.
+    Cross-platform: Windows, macOS, Linux.
     """
     
     def __init__(self):
@@ -121,8 +126,8 @@ class BrowserLauncher:
     
     def open_site(self, url: str):
         """Open a URL in the default browser."""
-        # macOS
-        subprocess.Popen(["open", url])
+        # Cross-platform: use webbrowser module
+        webbrowser.open(url)
         self.current_site = url
         time.sleep(2)  # Wait for browser to open
         print(f"[Browser] Opened: {url}")
@@ -134,50 +139,69 @@ class BrowserLauncher:
         return site
     
     def focus_browser(self):
-        """Bring browser to foreground (macOS)."""
-        # Try common browsers
-        for browser in ["Google Chrome", "Safari", "Firefox", "Arc"]:
+        """Bring browser to foreground."""
+        if sys.platform == "darwin":
+            # macOS
+            for browser in ["Google Chrome", "Safari", "Firefox", "Arc"]:
+                try:
+                    subprocess.run([
+                        "osascript", "-e",
+                        f'tell application "{browser}" to activate'
+                    ], capture_output=True)
+                    return
+                except:
+                    continue
+        elif sys.platform == "win32":
+            # Windows: browsers usually focus themselves when opening
+            pass
+        else:
+            # Linux: try wmctrl if available
             try:
-                subprocess.run([
-                    "osascript", "-e",
-                    f'tell application "{browser}" to activate'
-                ], capture_output=True)
-                return
+                subprocess.run(["wmctrl", "-a", "browser"], capture_output=True)
             except:
-                continue
+                pass
     
     def new_tab(self, url: Optional[str] = None):
         """Open a new tab."""
         if url:
             self.open_site(url)
         else:
-            # Cmd+T for new tab
-            subprocess.run([
-                "osascript", "-e",
-                'tell application "System Events" to keystroke "t" using command down'
-            ], capture_output=True)
+            # Platform-specific keyboard shortcut
+            if sys.platform == "darwin":
+                subprocess.run([
+                    "osascript", "-e",
+                    'tell application "System Events" to keystroke "t" using command down'
+                ], capture_output=True)
+            # On Windows, opening a new URL usually opens in new tab
+    
+    def close(self):
+        """Clean up (no-op for now)."""
+        pass
     
     def close_tab(self):
         """Close current tab."""
-        subprocess.run([
-            "osascript", "-e",
-            'tell application "System Events" to keystroke "w" using command down'
-        ], capture_output=True)
+        if sys.platform == "darwin":
+            subprocess.run([
+                "osascript", "-e",
+                'tell application "System Events" to keystroke "w" using command down'
+            ], capture_output=True)
     
     def navigate_back(self):
         """Go back in browser history."""
-        subprocess.run([
-            "osascript", "-e",
-            'tell application "System Events" to keystroke "[" using command down'
-        ], capture_output=True)
+        if sys.platform == "darwin":
+            subprocess.run([
+                "osascript", "-e",
+                'tell application "System Events" to keystroke "[" using command down'
+            ], capture_output=True)
     
     def scroll_page(self, direction: str = "down"):
         """Scroll the page."""
-        key = "Down" if direction == "down" else "Up"
-        subprocess.run([
-            "osascript", "-e",
-            f'tell application "System Events" to key code 125'  # Down arrow
-        ], capture_output=True)
+        if sys.platform == "darwin":
+            subprocess.run([
+                "osascript", "-e",
+                f'tell application "System Events" to key code 125'  # Down arrow
+            ], capture_output=True)
+
 
 
 class ExplorationSession:
