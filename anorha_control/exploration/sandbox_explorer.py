@@ -195,16 +195,27 @@ class SandboxExplorer:
 
     
     async def _close_browser(self):
-        """Close browser."""
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        """Close browser gracefully with error handling."""
+        try:
+            if self._browser:
+                await self._browser.close()
+        except Exception as e:
+            print(f"[Sandbox] Browser close warning: {e}")
+        try:
+            if self._playwright:
+                await self._playwright.stop()
+        except Exception as e:
+            print(f"[Sandbox] Playwright stop warning: {e}")
     
     async def _screenshot(self) -> Image.Image:
-        """Capture screenshot of the browser viewport."""
-        screenshot_bytes = await self._page.screenshot()
-        return Image.open(io.BytesIO(screenshot_bytes))
+        """Capture screenshot of the browser viewport with timeout protection."""
+        try:
+            screenshot_bytes = await self._page.screenshot(timeout=10000)  # 10s max
+            return Image.open(io.BytesIO(screenshot_bytes))
+        except Exception as e:
+            print(f"[Sandbox] Screenshot error: {e}")
+            # Return a blank image as fallback
+            return Image.new("RGB", (self.config.viewport_width, self.config.viewport_height), (255, 255, 255))
     
     def _save_screenshot(self, image: Image.Image, prefix: str) -> str:
         """Save screenshot and return path."""
@@ -499,16 +510,34 @@ class SandboxExplorer:
                     source = "vlm_correction"
                     print(f"   🎯 VLM: ({vlm_x}, {vlm_y}) | TRM: ({trm_px}, {trm_py}) | dist={distance:.0f}px → VLM override")
             else:
-                # VLM couldn't find target - use element matching or random
-                vlm_x, vlm_y = None, None
-                distance = None
-                distance_reward = 0.0
-                
-                # Fall back to element matching
+                # VLM couldn't find target - use element matching as ground truth
+                # This lets us train even without VLM
                 action = self._generate_action(elements, embedding, step_instruction)
                 exec_x, exec_y = action["x"], action["y"]
                 source = action["source"]
-                print(f"   ⚠️ VLM target not found - using {source}: ({exec_x}, {exec_y})")
+                
+                # Use matched element position as ground truth for training
+                # This gives partial reward for learning element types
+                if source in ["text_match", "input_match", "button_match", "element"]:
+                    vlm_x, vlm_y = exec_x, exec_y  # Element IS the ground truth
+                    distance = math.sqrt((trm_px - vlm_x)**2 + (trm_py - vlm_y)**2)
+                    
+                    # Partial distance reward (lower than VLM but still useful)
+                    if distance < 20:
+                        distance_reward = 0.6
+                    elif distance < 50:
+                        distance_reward = 0.3
+                    elif distance < 100:
+                        distance_reward = 0.1
+                    else:
+                        distance_reward = 0.0
+                    print(f"   📍 Element: ({vlm_x}, {vlm_y}) | TRM: ({trm_px}, {trm_py}) | dist={distance:.0f}px [{source}]")
+                else:
+                    # Random/fallback - no ground truth
+                    vlm_x, vlm_y = None, None
+                    distance = None
+                    distance_reward = 0.0
+                    print(f"   ⚠️ No ground truth - using {source}: ({exec_x}, {exec_y})")
             
             # =========================================================
             # PHASE 4: Execute action

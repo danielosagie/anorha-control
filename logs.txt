@@ -1,24 +1,66 @@
+[Sandbox] Navigated to: http://the-internet.herokuapp.com/inputs
+
+📍 Episode 11
+   Site: http://the-internet.herokuapp.com/inputs
+   Task: Type numbers into the input field
+   🧠 VLM Planning...
+   📝 Plan: ['Type numbers into the input field']...
+
+   Step 1/5: click Type numbers into the input field
+   ⚠️ VLM target not found - using input_fallback: (640, 150)
+   ⌨️ Type 'John Doe' @ (640, 150)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 2/5: Type numbers into the input field
+   ⚠️ VLM target not found - using input_fallback: (640, 150)
+   ⌨️ Type 'hello world' @ (640, 150)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 3/5: Type numbers into the input field
+   ⚠️ VLM target not found - using input_fallback: (640, 150)
+
 ✅ Data saved to: D:\danie\Documents\Code Projects\anorha-control\data\experiences.db
 📊 Final stats:
-  Total actions: 5034
-  Successes: 850
+  Total actions: 5079
+  Successes: 855
   Unique states: 0
-  Success rate: 16.9%
-
-danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
-$ git pull origin main
-remote: Enumerating objects: 9, done.
-remote: Counting objects: 100% (9/9), done.
-remote: Compressing objects: 100% (1/1), done.
-remote: Total 5 (delta 4), reused 5 (delta 4), pack-reused 0 (from 0)
-Unpacking objects: 100% (5/5), 930 bytes | 1024 bytes/s, done.
-From https://github.com/danielosagie/anorha-control
- * branch            main       -> FETCH_HEAD
-   31739c7..154437e  main       -> origin/main
-Updating 31739c7..154437e
-Fast-forward
- anorha_control/models/vision_encoder.py | 17 ++++++++++++++---
- 1 file changed, 14 insertions(+), 3 deletions(-)
+  Success rate: 16.8%
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 368, in <module>
+    main()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 313, in main
+    asyncio.run(run_explore(args))
+  File "C:\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\asyncio\base_events.py", line 687, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\main.py", line 137, in run_explore
+    await explorer.explore_forever()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 696, in explore_forever
+    await self._close_browser()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 200, in _close_browser
+    await self._browser.close()
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\async_api\_generated.py", line 14322, in close
+    return mapping.from_maybe_impl(await self._impl_obj.close(reason=reason))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_browser.py", line 241, in close
+    raise e
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_browser.py", line 238, in close
+    await self._channel.send("close", None, {"reason": reason})
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 69, 
+in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 559, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+Exception: Browser.close: Connection closed while reading from the driver
 
 danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
 $ uv run python -m anorha_control.main explore --headless --planner-model qwen2.5-vl:7b
@@ -29,8 +71,9 @@ Device: cpu
 
 Loading vision encoder...
 [Vision] Loading SigLIP2: google/siglip2-base-patch16-224
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
 The image processor of type `SiglipImageProcessor` is now loaded as a fast processor by default, even if the model checkpoint was saved with a slow processor. This is a breaking change and may produce slightly different outputs. To continue using the slow processor, instantiate this class with `use_fast=False`.
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████| 408/408 [00:00<00:00, 1643.67it/s, Materializing param=vision_model.post_layernorm.weight]
+Loading weights: 100%|████████| 408/408 [00:00<00:00, 1787.85it/s, Materializing param=vision_model.post_layernorm.weight]
 [Vision] SigLIP2 loaded successfully: 768d
 [Vision] Encoder ready: 768d output, temporal=0
   Vision encoder: 768d output (temporal=0)
@@ -67,29 +110,38 @@ Initializing planner: qwen2.5-vl:7b
    Basic proficiency: 10,000-20,000 experiences
    High accuracy: 50,000-100,000 experiences
 [Sandbox] Browser initialized with ad blocking
-[Sandbox] Navigated to: https://gh-users-search.netlify.app/
+[Sandbox] Navigated to: https://testsheepnz.github.io/BasicCalculator.html
 
 📍 Episode 1
-   Site: https://gh-users-search.netlify.app/
-   Task: Search for 'torvalds' and view their profile
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
    🧠 VLM Planning...
-   📝 Plan: ['search field', 'search field', 'search button']...
+   📝 Plan: ['Solve: (25 * 4) - 17 = ?']...
 
-   Step 1/5: click search field
-   ⚠️ VLM target not found - using text_match: (896, 194)
-   🖱️ Click @ (896, 194)
+   Step 1/5: click Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using trm: (590, 645)
+   🖱️ Click @ (590, 645)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
-   Step 2/5: type search field
-   ⚠️ VLM target not found - using input_match: (466, 194)
-   ⌨️ Type 'hello world' @ (466, 194)
+   Step 2/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (908, 51)
+   🖱️ Click @ (908, 51)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
+
+   Step 3/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (221, 3243)
+   🖱️ Click @ (221, 3243)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
-   Step 3/5: click search button
-   ⚠️ VLM target not found - using text_match: (896, 194)
-   🖱️ Click @ (896, 194)
+   Step 4/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (252, 1243)
+   🖱️ Click @ (252, 1243)
    ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
-   ⚠️ 3 consecutive failures - ending episode
+
+   Step 5/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (131, 52)
+   🖱️ Click @ (131, 52)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
 [Sandbox] Navigated to: https://bookcart.azurewebsites.net/
    🎯 Strategic planning (GLM)...
 [StrategicPlanner] Generation error: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=60.0)
@@ -102,162 +154,291 @@ Initializing planner: qwen2.5-vl:7b
    📝 Plan: ['search field', 'search field', 'search button']...
 
    Step 1/5: click search field
-   ⚠️ VLM target not found - using text_match: (541, 32)
-   🖱️ Click @ (541, 32)
+   ⚠️ VLM target not found - using random: (207, 484)
+   🖱️ Click @ (207, 484)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
    Step 2/5: type search field
    ⚠️ VLM target not found - using input_match: (541, 32)
-   ⌨️ Type 'test@example.com' @ (541, 32)
+   ⌨️ Type 'hello world' @ (541, 32)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
    Step 3/5: click search button
-   ⚠️ VLM target not found - using trm: (517, 236)
-   🖱️ Click @ (517, 236)
+   ⚠️ VLM target not found - using trm: (535, 548)
+   🖱️ Click @ (535, 548)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
    ⚠️ 3 consecutive failures - ending episode
-[Sandbox] Navigated to: http://uitestingplayground.com/click
+[Sandbox] Navigated to: https://demoqa.com/automation-practice-form
 
 📍 Episode 3
-   Site: http://uitestingplayground.com/click
-   Task: Click the button that moves and changes
+   Site: https://demoqa.com/automation-practice-form
+   Task: Fill out the complete registration form and submit
    🧠 VLM Planning...
-   📝 Plan: ['target element']...
+   📝 Plan: ['Fill out the complete registration form and submit']...
 
-   Step 1/5: click target element
-   ⚠️ VLM target not found - using text_match: (229, 392)
-   🖱️ Click @ (229, 392)
+   Step 1/5: click Fill out the complete registration form and submit
+   ⚠️ VLM target not found - using input_match: (580, 574)
+   ⌨️ Type 'John Doe' @ (580, 574)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
-   Step 2/5: Click the button that moves and changes
-   ⚠️ VLM target not found - using text_match: (229, 392)
-   🖱️ Click @ (229, 392)
+   Step 2/5: Fill out the complete registration form and submit
+   ⚠️ VLM target not found - using input_match: (839, 574)
+   ⌨️ Type 'New York' @ (839, 574)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
-   Step 3/5: Click the button that moves and changes
+   Step 3/5: Fill out the complete registration form and submit
+   ⚠️ VLM target not found - using input_match: (709, 620)
+   ⌨️ Type 'John Doe' @ (709, 620)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   ⚠️ 3 consecutive failures - ending episode
 
-🛑 KILL SWITCH (<ctrl>+<shift>+<esc>)
-[Border] Green border deactivated
+📊 Progress: 5090 actions, 2/11 successes
+[Sandbox] Navigated to: https://practice.expandtesting.com/
 
-🛑 Kill switch triggered!
-   ⚠️ VLM target not found - using text_match: (229, 392)
-   🖱️ Click @ (229, 392)
+📍 Episode 4
+   Site: https://practice.expandtesting.com/
+   Task: Complete various form types
+   🧠 VLM Planning...
+   📝 Plan: ['Complete various form types']...
+
+   Step 1/5: click Complete various form types
+   ⚠️ VLM target not found - using input_match: (564, 755)
+   ⌨️ Type 'test@example.com' @ (564, 755)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 2/5: Complete various form types
+   ⚠️ VLM target not found - using random: (160, 89)
+   ⌨️ Type 'New York' @ (160, 89)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
+
+   Step 3/5: Complete various form types
+   ⚠️ VLM target not found - using input_match: (564, 125)
+   ⌨️ Type 'John Doe' @ (564, 125)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 4/5: Complete various form types
+   ⚠️ VLM target not found - using input_fallback: (564, 125)
+   ⌨️ Type 'test@example.com' @ (564, 125)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 5/5: Complete various form types
+   ⚠️ VLM target not found - using input_fallback: (564, 125)
+   ⌨️ Type 'test@example.com' @ (564, 125)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+[Sandbox] Navigated to: https://testsheepnz.github.io/BasicCalculator.html
+
+📍 Episode 5
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
+   🧠 VLM Planning...
+   📝 Plan: ['Solve: (25 * 4) - 17 = ?']...
+
+   Step 1/5: click Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using random: (1040, 1678)
+   🖱️ Click @ (1040, 1678)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 2/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (1124, 51)
+   🖱️ Click @ (1124, 51)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
+
+   Step 3/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (492, 174)
+   🖱️ Click @ (492, 174)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
+
+   Step 4/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using element: (382, 8365)
+   🖱️ Click @ (382, 8365)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 5/5: Solve: (25 * 4) - 17 = ?
+   ⚠️ VLM target not found - using random: (545, 4271)
+   🖱️ Click @ (545, 4271)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+[Sandbox] Navigated to: https://practice.expandtesting.com/inputs
+
+📍 Episode 6
+   Site: https://practice.expandtesting.com/inputs
+   Task: Fill out various input types including textarea
+   🧠 VLM Planning...
+   📝 Plan: ['Fill out various input types including textarea']...
+
+   Step 1/5: click Fill out various input types including textarea
+   ⚠️ VLM target not found - using input_match: (330, 918)
+   ⌨️ Type 'New York' @ (330, 918)
+   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
+
+   Step 2/5: Fill out various input types including textarea
+   ⚠️ VLM target not found - using input_match: (330, 288)
+   ⌨️ Type 'hello world' @ (330, 288)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 3/5: Fill out various input types including textarea
+   ⚠️ VLM target not found - using input_match: (330, 288)
+   ⌨️ Type '123 Main St' @ (330, 288)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 4/5: Fill out various input types including textarea
+   ⚠️ VLM target not found - using input_match: (330, 288)
+   ⌨️ Type 'New York' @ (330, 288)
    ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
    ⚠️ 3 consecutive failures - ending episode
 
-📊 Progress: 5043 actions, 0/9 successes
-
-✅ Saved 5043 experiences to data\experiences.db
-
-📊 Final Stats:
-   Episodes: 3
-   Success rate: 0/9 (0.0%)
-
-📂 Experiences by Category:
-   unknown: 4331 (0 successful, 0.0%)
-   precision: 254 (61 successful, 24.0%)
-   forms: 208 (29 successful, 13.9%)
-   navigation: 89 (4 successful, 4.5%)
-   typing: 89 (18 successful, 20.2%)
-   ecommerce: 41 (14 successful, 34.1%)
-   longhorizon: 31 (1 successful, 3.2%)
-
-🌐 Top Sites:
-   https://testsheepnz.github.io/BasicCalculator.html: 554
-   http://uitestingplayground.com/click: 277
-   https://www.saucedemo.com/: 247
-   https://practice.expandtesting.com/: 223
-   https://thinking-tester-contact-list.herokuapp.com...: 209
-   https://demoqa.com/automation-practice-form: 203
-   https://humanbenchmark.com/tests/reactiontime: 194
-   https://en.wikipedia.org/wiki/Main_Page: 175
-   https://testsmith-io.github.io/locator-game/: 175
-
-🎯 Session Task Types: 0
-
-✅ Data saved to: D:\danie\Documents\Code Projects\anorha-control\data\experiences.db
-📊 Final stats:
-  Total actions: 5043
-  Successes: 850
-  Unique states: 0
-  Success rate: 16.9%
-
-danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
-$ uv run python -m anorha_control.main explore --headless --planner-model
-usage: main.py explore [-h] [--train-concurrent] [--epsilon EPSILON] [--steps STEPS] [--db DB] [--checkpoint CHECKPOINT] [--planner-model PLANNER_MODEL] [--headless] [--with-dashboard]
-                       [--legacy-vision] [--temporal-frames TEMPORAL_FRAMES]
-main.py explore: error: argument --planner-model: expected one argument
-
-danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
-$ uv run python -m anorha_control.main explore --headless --planner-model glm-4.7-flash:latest
-============================================================
-🖱️  ANORHA-CONTROL: Real Mouse Explorer
-============================================================
-Device: cpu
-
-Loading vision encoder...
-[Vision] Loading SigLIP2: google/siglip2-base-patch16-224
-The image processor of type `SiglipImageProcessor` is now loaded as a fast processor by default, even if the model checkpoint was saved with a slow processor. This is a breaking change and may produce slightly different outputs. To continue using the slow processor, instantiate this class with `use_fast=False`.
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-Loading weights: 100%|███████████████████████████████████████████████████████████████████████████| 408/408 [00:00<00:00, 2369.94it/s, Materializing param=vision_model.post_layernorm.weight]
-[Vision] SigLIP2 loaded successfully: 768d
-[Vision] Encoder ready: 768d output, temporal=0
-  Vision encoder: 768d output (temporal=0)
-Loading TRM...
-  TRM: 9,513,992 params
-
-Database: data\experiences.db
-
-Config:
-  Epsilon: 0.3
-  Steps per episode: 10
-
-⚠️  WARNING: This will control your REAL mouse!
-   Press Cmd+Shift+Escape at any time to STOP
-   Press Cmd+Shift+P to PAUSE/RESUME
-
-   Starting in 3 seconds...
-
-Initializing planner: glm-4.7-flash:latest
-
-🔒 Running in SANDBOX mode - your mouse is free!
-
-============================================================
-🔒 ANORHA-CONTROL: Sandbox Explorer Active
-   Browser-only mode - your mouse is free!
-   Press Cmd+Shift+Escape to stop
-   Press Cmd+Shift+P to pause/resume
-============================================================
-[Border] Green border activated (#8cc63f)
-[KillSwitch] Listening for <ctrl>+<shift>+<esc>
-[PauseSwitch] Listening for <ctrl>+<shift>+p
-
-📊 Training Estimates:
-   Basic proficiency: 10,000-20,000 experiences
-   High accuracy: 50,000-100,000 experiences
-[Sandbox] Browser initialized with ad blocking
+📊 Progress: 5104 actions, 6/25 successes
 [Sandbox] Navigated to: https://www.saucedemo.com/
-   🎯 Strategic planning (GLM)...
-[StrategicPlanner] Generation error: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=60.0)
-   📋 Strategy: 5 steps
 
-📍 Episode 1
+📍 Episode 7
    Site: https://www.saucedemo.com/
-   Task: Login, add 2 items to cart, complete checkout
+   Task: Login with username 'standard_user' and password 'secret_sauce'
    🧠 VLM Planning...
-[LocalLLM] Error: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=30.0)
    📝 Plan: ['username field', 'username field', 'password field', 'password field', 'login button']...
 
    Step 1/7: click username field
-[LocalLLM] Error: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=30.0)
    ⚠️ VLM target not found - using random: (640, 173)
    🖱️ Click @ (640, 173)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
    Step 2/7: type username field
-[LocalLLM] Error: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=30.0)
-   ⚠️ VLM target not found - using random: (640, 326)
-   ⌨️ Type 'John Doe' @ (640, 326)
+   ⚠️ VLM target not found - using random: (640, 173)
+   ⌨️ Type 'New York' @ (640, 173)
    ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
 
    Step 3/7: click password field
+   ⚠️ VLM target not found - using random: (640, 227)
+   🖱️ Click @ (640, 227)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   ⚠️ 3 consecutive failures - ending episode
+[Sandbox] Navigated to: http://the-internet.herokuapp.com/
+
+📍 Episode 8
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+   🧠 VLM Planning...
+   📝 Plan: ['username field', 'username field', 'password field', 'password field', 'login button']...
+
+   Step 1/7: click username field
+   ⚠️ VLM target not found - using random: (187, 642)
+   🖱️ Click @ (187, 642)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 2/7: type username field
+   ⚠️ VLM target not found - using input_fallback: (640, 146)
+   ⌨️ Type 'John Doe' @ (640, 146)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 3/7: click password field
+   ⚠️ VLM target not found - using random: (640, 146)
+   🖱️ Click @ (640, 146)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   ⚠️ 3 consecutive failures - ending episode
+[Sandbox] Navigated to: https://testsheepnz.github.io/BasicCalculator.html
+
+📍 Episode 9
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   🧠 VLM Planning...
+   📝 Plan: ['Solve: 42 + 13 = ?']...
+
+   Step 1/5: click Solve: 42 + 13 = ?
+   ⚠️ VLM target not found - using trm: (692, 684)
+   🖱️ Click @ (692, 684)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 2/5: Solve: 42 + 13 = ?
+   ⚠️ VLM target not found - using element: (1040, 1678)
+   🖱️ Click @ (1040, 1678)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 3/5: Solve: 42 + 13 = ?
+   ⚠️ VLM target not found - using random: (153, 51)
+   🖱️ Click @ (153, 51)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   ⚠️ 3 consecutive failures - ending episode
+
+📊 Progress: 5113 actions, 6/34 successes
+[Sandbox] Navigated to: https://www.saucedemo.com/
+
+📍 Episode 10
+   Site: https://www.saucedemo.com/
+   Task: Login with username 'standard_user' and password 'secret_sauce'
+   🧠 VLM Planning...
+   📝 Plan: ['username field', 'username field', 'password field', 'password field', 'login button']...
+
+   Step 1/7: click username field
+   ⚠️ VLM target not found - using random: (640, 227)
+   🖱️ Click @ (640, 227)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 2/7: type username field
+   ⚠️ VLM target not found - using input_match: (640, 173)
+   ⌨️ Type '123 Main St' @ (640, 173)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 3/7: click password field
+   ⚠️ VLM target not found - using input_match: (640, 227)
+   🖱️ Click @ (640, 227)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+   ⚠️ 3 consecutive failures - ending episode
+[Sandbox] Navigated to: http://uitestingplayground.com/textinput
+
+📍 Episode 11
+   Site: http://uitestingplayground.com/textinput
+   Task: Type a new button name and click the button to change its text
+   🧠 VLM Planning...
+   📝 Plan: ['target element']...
+
+   Step 1/5: click target element
+   ⚠️ VLM target not found - using trm: (627, 720)
+   🖱️ Click @ (627, 720)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 2/5: Type a new button name and click the button to change its text
+   ⚠️ VLM target not found - using input_fallback: (640, 400)
+   ⌨️ Type '123 Main St' @ (640, 400)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 3/5: Type a new button name and click the button to change its text
+   ⚠️ VLM target not found - using input_fallback: (640, 400)
+   ⌨️ Type 'John Doe' @ (640, 400)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   ⚠️ 3 consecutive failures - ending episode
+[Sandbox] Navigated to: https://practice.expandtesting.com/
+
+📍 Episode 12
+   Site: https://practice.expandtesting.com/
+   Task: Complete various form types
+   🧠 VLM Planning...
+   📝 Plan: ['Complete various form types']...
+
+   Step 1/5: click Complete various form types
+   ⚠️ VLM target not found - using input_match: (564, 755)
+   ⌨️ Type 'test@example.com' @ (564, 755)
+
+❌ Error: Page.screenshot: Timeout 30000ms exceeded.
+Call log:
+  - taking page screenshot
+
+Traceback (most recent call last):
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 668, in explore_forever
+    await self.explore_episode()
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 537, in explore_episode
+    after_img = await self._screenshot()
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\anorha_control\exploration\sandbox_explorer.py", line 206, in _screenshot
+    screenshot_bytes = await self._page.screenshot()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\async_api\_generated.py", line 9792, in screenshot
+    await self._impl_obj.screenshot(
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_page.py", line 814, in screenshot
+    encoded_binary = await self._channel.send(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 559, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: Page.screenshot: Timeout 30000ms exceeded.
+Call log:
+  - taking page screenshot
