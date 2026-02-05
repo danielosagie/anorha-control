@@ -140,6 +140,45 @@ def create_border():
 
         borders.append(border)
     
+    # Controls hint label at bottom center
+    hint = tk.Tk()
+    hint.overrideredirect(True)
+    hint.attributes("-topmost", True)
+    hint.attributes("-alpha", 0.85)
+    hint_w, hint_h = 400, 40
+    hint_x = (width - hint_w) // 2
+    hint_y = height - 60
+    hint.geometry(f"{{hint_w}}x{{hint_h}}+{{hint_x}}+{{hint_y}}")
+    hint.configure(bg="#1a1a1a")
+    
+    # Rounded corners via canvas
+    canvas = tk.Canvas(hint, width=hint_w, height=hint_h, bg="#1a1a1a", highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+    
+    # Draw rounded rectangle
+    radius = 15
+    canvas.create_arc(0, 0, radius*2, radius*2, start=90, extent=90, fill="#1a1a1a", outline="#1a1a1a")
+    canvas.create_arc(hint_w-radius*2, 0, hint_w, radius*2, start=0, extent=90, fill="#1a1a1a", outline="#1a1a1a")
+    canvas.create_arc(0, hint_h-radius*2, radius*2, hint_h, start=180, extent=90, fill="#1a1a1a", outline="#1a1a1a")
+    canvas.create_arc(hint_w-radius*2, hint_h-radius*2, hint_w, hint_h, start=270, extent=90, fill="#1a1a1a", outline="#1a1a1a")
+    
+    # Text
+    ctrl_key = "Ctrl" if sys.platform != "darwin" else "Cmd"
+    hint_text = f"STOP: {{ctrl_key}}+Shift+Esc  |  PAUSE: {{ctrl_key}}+Shift+P"
+    canvas.create_text(hint_w//2, hint_h//2, text=hint_text, fill="{self.color}", font=("Arial", 12, "bold"))
+    
+    # Make click-through on Windows
+    if sys.platform == "win32":
+        import ctypes
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x80000
+        WS_EX_TRANSPARENT = 0x20
+        hwnd = ctypes.windll.user32.GetParent(hint.winfo_id())
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+    
+    borders.append(hint)
+    
     # Keep windows alive
     def keep_alive():
         for b in borders:
@@ -161,6 +200,7 @@ if __name__ == "__main__":
 '''
         with open(self._script_path, 'w') as f:
             f.write(script)
+
     
     def show(self):
         """Show the green border."""

@@ -78,8 +78,18 @@ async def run_explore(args):
     llm = LocalLLM(model=planner_model)
     planner = TaskPlanner(llm)
     
-    # Create explorer
-    explorer = RealMouseExplorer(vision, trm, db, exp_config, planner=planner)
+    # Create explorer (sandbox or real mouse)
+    if args.headless:
+        from anorha_control.exploration import SandboxExplorer, SandboxConfig
+        sandbox_config = SandboxConfig(
+            headless=False,  # Show browser window (headless=True would hide it)
+            epsilon=args.epsilon,
+            max_episode_steps=args.steps,
+        )
+        explorer = SandboxExplorer(vision, trm, db, sandbox_config, planner=planner)
+        print("\n🔒 Running in SANDBOX mode - your mouse is free!")
+    else:
+        explorer = RealMouseExplorer(vision, trm, db, exp_config, planner=planner)
     
     # Create trainer (if concurrent training enabled)
     trainer = None
@@ -105,15 +115,18 @@ async def run_explore(args):
         if trainer:
             trainer.stop()
         
-        # Print final stats
+        # Print final stats with persistence feedback
         stats = await db.get_stats()
-        print(f"\n📊 Final stats:")
+        db_path_str = str(db_path.absolute())
+        print(f"\n✅ Data saved to: {db_path_str}")
+        print(f"📊 Final stats:")
         print(f"  Total actions: {stats.get('total_actions', 0)}")
         print(f"  Successes: {stats.get('total_successes', 0)}")
         print(f"  Unique states: {stats.get('unique_states', 0)}")
         print(f"  Success rate: {stats.get('success_rate', 0):.1%}")
         
         await db.close()
+
 
 
 async def run_train(args):
@@ -244,6 +257,8 @@ def main():
     explore_parser.add_argument("--db", type=str, help="Database path")
     explore_parser.add_argument("--checkpoint", type=str, help="Load TRM checkpoint")
     explore_parser.add_argument("--planner-model", type=str, default="qwen3-vl:2b", help="VL model for planning")
+    explore_parser.add_argument("--headless", action="store_true", help="Run in sandboxed browser mode (doesn't control your mouse)")
+
     
     # Train command
     train_parser = subparsers.add_parser("train", help="Train on collected experiences")
