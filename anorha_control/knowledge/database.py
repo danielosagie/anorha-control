@@ -258,6 +258,40 @@ class ExperienceDB:
             }
         return {}
     
+    async def get_category_stats(self) -> Dict[str, Any]:
+        """Get task category breakdown from experience metadata."""
+        cursor = await self._conn.execute("SELECT metadata FROM experiences")
+        rows = await cursor.fetchall()
+        
+        category_counts = {}
+        category_successes = {}
+        site_counts = {}
+        
+        for row in rows:
+            try:
+                meta = json.loads(row[0]) if row[0] else {}
+                category = meta.get("category", "unknown")
+                site = meta.get("site", "unknown")
+                success = meta.get("success", False)
+                
+                # Count by category
+                category_counts[category] = category_counts.get(category, 0) + 1
+                if success:
+                    category_successes[category] = category_successes.get(category, 0) + 1
+                
+                # Count by site
+                site_counts[site] = site_counts.get(site, 0) + 1
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        
+        return {
+            "by_category": category_counts,
+            "successes_by_category": category_successes,
+            "by_site": site_counts,
+            "total_experiences": len(rows),
+        }
+
+    
     def _row_to_experience(self, row) -> Experience:
         """Convert database row to Experience object."""
         return Experience(

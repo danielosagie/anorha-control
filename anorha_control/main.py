@@ -289,6 +289,10 @@ def main():
     # Test command
     test_parser = subparsers.add_parser("test", help="Test system components")
     
+    # Stats command
+    stats_parser = subparsers.add_parser("stats", help="View database statistics")
+    stats_parser.add_argument("--db", type=str, help="Database path")
+    
     args = parser.parse_args()
     
     if args.command == "explore":
@@ -297,7 +301,55 @@ def main():
         asyncio.run(run_train(args))
     elif args.command == "test":
         run_test(args)
+    elif args.command == "stats":
+        asyncio.run(run_stats(args))
+
+
+async def run_stats(args):
+    """Show database statistics."""
+    from anorha_control.knowledge.database import ExperienceDB
+    from pathlib import Path
+    
+    db_path = Path(args.db) if args.db else Path("data/experiences.db")
+    
+    if not db_path.exists():
+        print(f"❌ Database not found: {db_path}")
+        return
+    
+    print(f"📂 Database: {db_path}")
+    
+    db = ExperienceDB(db_path)
+    await db.connect()
+    
+    try:
+        stats = await db.get_stats()
+        category_stats = await db.get_category_stats()
+        
+        print(f"\n📊 Overall Stats:")
+        print(f"   Total actions: {stats.get('total_actions', 0)}")
+        print(f"   Total successes: {stats.get('total_successes', 0)}")
+        print(f"   Success rate: {100*stats.get('success_rate', 0):.1f}%")
+        print(f"   Unique states: {stats.get('unique_states', 0)}")
+        
+        print(f"\n📂 Experiences by Category:")
+        for cat, count in sorted(category_stats.get('by_category', {}).items(), key=lambda x: -x[1]):
+            successes = category_stats.get('successes_by_category', {}).get(cat, 0)
+            rate = 100 * successes / max(1, count)
+            print(f"   {cat}: {count} ({successes} successful, {rate:.1f}%)")
+        
+        print(f"\n🌐 Top Sites:")
+        top_sites = sorted(category_stats.get('by_site', {}).items(), key=lambda x: -x[1])[:15]
+        for site, count in top_sites:
+            if site and site != "unknown":
+                display_site = site[:50] + "..." if len(site) > 50 else site
+                print(f"   {display_site}: {count}")
+        
+        print(f"\n📈 Total experiences: {category_stats.get('total_experiences', 0)}")
+        
+    finally:
+        await db.close()
 
 
 if __name__ == "__main__":
     main()
+

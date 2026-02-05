@@ -402,7 +402,10 @@ class SandboxExplorer:
             status = "✓" if success else "✗"
             print(f"   {status} reward={reward:.2f}")
             
-            # Create experience
+            # Create experience with category tracking
+            task_category = self.current_task.category.value if self.current_task else "unknown"
+            task_name = self.current_task.name if self.current_task else "exploration"
+            
             exp = Experience(
                 screenshot_before_path=before_path,
                 screenshot_after_path=after_path,
@@ -414,8 +417,16 @@ class SandboxExplorer:
                 state_hash_after=state_hash_after,
                 instruction=step_instruction,
                 success=success,
-                metadata={"step": step_idx, "source": action["source"], "site": self.current_site},
+                metadata={
+                    "step": step_idx,
+                    "source": action["source"],
+                    "site": self.current_site,
+                    "category": task_category,
+                    "task_name": task_name,
+                    "success": success,
+                },
             )
+
             experiences.append(exp)
             
             # Store
@@ -519,15 +530,32 @@ class SandboxExplorer:
             self.indicator.stop()
 
             
-            # Show final stats
+            # Show final stats with category breakdown
             stats = await self.db.get_stats()
+            category_stats = await self.db.get_category_stats()
             curriculum_stats = self.curriculum.get_stats()
+            
             print(f"\n✅ Saved {stats.get('total_actions', 0)} experiences to {self.db.db_path}")
-            print(f"📊 Final stats:")
+            print(f"\n📊 Final Stats:")
             print(f"   Episodes: {self.episode_count}")
-            print(f"   Success rate: {self.total_successes}/{self.total_actions}")
-            print(f"   Task types completed: {curriculum_stats['unique_tasks_completed']}")
-            print(f"   By category: {curriculum_stats['by_category']}")
+            print(f"   Success rate: {self.total_successes}/{self.total_actions} ({100*self.total_successes/max(1,self.total_actions):.1f}%)")
+            
+            print(f"\n📂 Experiences by Category:")
+            for cat, count in sorted(category_stats.get('by_category', {}).items(), key=lambda x: -x[1]):
+                successes = category_stats.get('successes_by_category', {}).get(cat, 0)
+                rate = 100 * successes / max(1, count)
+                print(f"   {cat}: {count} ({successes} successful, {rate:.1f}%)")
+            
+            print(f"\n🌐 Top Sites:")
+            top_sites = sorted(category_stats.get('by_site', {}).items(), key=lambda x: -x[1])[:10]
+            for site, count in top_sites:
+                if site and site != "unknown":
+                    # Truncate long URLs
+                    display_site = site[:50] + "..." if len(site) > 50 else site
+                    print(f"   {display_site}: {count}")
+            
+            print(f"\n🎯 Session Task Types: {curriculum_stats['unique_tasks_completed']}")
+
 
 
     
