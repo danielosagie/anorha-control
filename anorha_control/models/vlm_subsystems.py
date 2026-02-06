@@ -163,7 +163,16 @@ class LlamaCppBackend(VLMBackend):
             )
             
             if response.status_code != 200:
-                print(f"[llama.cpp] HTTP {response.status_code}: {response.text[:200]}")
+                err_text = response.text
+                print(f"[llama.cpp] HTTP {response.status_code}: {err_text[:200]}")
+                if "image input is not supported" in err_text or "mmproj" in err_text:
+                    if not getattr(LlamaCppBackend, "_warned_vision", False):
+                        LlamaCppBackend._warned_vision = True
+                        print("\n[llama.cpp] ⚠️ VISION NOT SUPPORTED: Your server is running a text-only model.")
+                        print("   Options:")
+                        print("   1. Use Ollama instead: omit --llamacpp and run: ollama pull qwen3-vl:2b")
+                        print("   2. Start llama.cpp with a VLM: pass --mmproj <path> to load the vision encoder")
+                        print("   3. Use a merged GGUF that includes vision (e.g. Qwen3-VL-*-Merged-*.gguf)\n")
                 return ""
             
             result = response.json()

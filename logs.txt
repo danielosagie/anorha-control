@@ -1,89 +1,79 @@
-[Sandbox] Browser initialized with ad blocking
-[Sandbox] Navigated to: https://humanbenchmark.com/tests/reactiontime
+LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] 💭 Thinking mode detected (1129 chars)
+[LocalLLM] ⏱️ 16.1s | Response: 1129 chars
+   📝 Plan: ['username field', 'username field', 'password field', 'password field', 'login button']...
 
-📍 Episode 1
-   Site: https://humanbenchmark.com/tests/reactiontime
-   Task: Click when the screen turns green
-   🧠 VLM Planning...
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-   📝 Plan: ['target element']...
-
-   Step 1/5: click target element
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   ⚠️ No ground truth - using trm: (1172, 442)
-   🖱️ Click @ (1172, 442)
-   ✓ reward=0.80 (dist_r=0.00 vis_r=0.80)
-
-   Step 2/5: Click when the screen turns green
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   ⚠️ No ground truth - using random: (1028, 1337)
-   🖱️ Click @ (1028, 1337)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
-
-   Step 3/5: Click when the screen turns green
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   📍 Element: (916, 1047) | TRM: (1066, 301) | dist=761px [text_match]
-   🖱️ Click @ (916, 1047)
+   Step 1/7: click username field
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 19.3s | Response: 35 chars
+[LocalLLM] locate_target raw: {"x": 120, "y": 310, "found": true}
+[LocalLLM] locate_target: Found at (153, 248) [scaled from 120, 310]
+   🎯 VLM: (153, 248) | TRM: (907, 507) | dist=797px → VLM override
+   🖱️ Click @ (153, 248)
    ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)
 
-   Step 4/5: Click when the screen turns green
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   ⚠️ No ground truth - using random: (1016, 1766)
-   🖱️ Click @ (1016, 1766)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
-   ⚠️ 3 consecutive failures - ending episode
-[Sandbox] Navigated to: https://en.wikipedia.org/wiki/Main_Page
-
-📍 Episode 2
-   Site: https://en.wikipedia.org/wiki/Main_Page
-   Task: Navigate to the article about 'Machine Learning' by clicking links
-   🧠 VLM Planning...
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-   📝 Plan: ['target element']...
-
-   Step 1/5: click target element
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   ⚠️ No ground truth - using trm: (1175, 434)
-   🖱️ Click @ (1175, 434)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
-
-   Step 2/5: Navigate to the article about 'Machine Learning' by clicking links
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   ⚠️ No ground truth - using random: (145, 442)
-   🖱️ Click @ (145, 442)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
-
-   Step 3/5: Navigate to the article about 'Machine Learning' by clicking links
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
-[LocalLLM] locate_target: No response from VLM
-   📍 Element: (632, 153) | TRM: (1187, 209) | dist=558px [text_match]
-   🖱️ Click @ (632, 153)
+   Step 2/7: type username field
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] 💭 Thinking mode detected (1970 chars)
+[LocalLLM] ⏱️ 11.8s | Response: 1970 chars
+[LocalLLM] locate_target raw: So, let's look at the image. The task is to find the "username field". First, check the list of examples. There's a section called "Basic Auth (user and pass: admin)". Wait, but the question is about
+[LocalLLM] locate_target: No JSON in response
+   📍 Element: (209, 539) | TRM: (930, 525) | dist=721px [element]
+   ⌨️ Type 'hello world' @ (209, 539)
    ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)
+
+   Step 3/7: click password field
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 12.9s | Response: 32 chars
+[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
+[LocalLLM] locate_target: Element not found by VLM
+   ⚠️ No ground truth - using trm: (764, 621)
+   🖱️ Click @ (764, 621)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
    ⚠️ 3 consecutive failures - ending episode
 [Sandbox] Navigated to: https://testsheepnz.github.io/BasicCalculator.html
 
-📍 Episode 3
+📍 Episode 6
    Site: https://testsheepnz.github.io/BasicCalculator.html
    Task: Solve: (25 * 4) - 17 = ?
    🧠 VLM Planning...
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
-[LocalLLM] Empty response from qwen3-vl:2b
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] 💭 Thinking mode detected (943 chars)
+[LocalLLM] ⏱️ 16.1s | Response: 943 chars
    📝 Plan: ['Solve: (25 * 4) - 17 = ?']...
 
    Step 1/5: click Solve: (25 * 4) - 17 = ?
-[LocalLLM] Calling qwen3-vl:2b (images=1)...
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 13.8s | Response: 32 chars
+[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
+[LocalLLM] locate_target: Element not found by VLM
+   ⚠️ No ground truth - using trm: (638, 412)
+   🖱️ Click @ (638, 412)
+   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+
+   Step 2/5: Solve: (25 * 4) - 17 = ?
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 4.7s | Response: 32 chars
+[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
+[LocalLLM] locate_target: Element not found by VLM
+   ⚠️ No ground truth - using random: (418, 1326)
+   🖱️ Click @ (418, 1326)
+   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+
+   Step 3/5: Solve: (25 * 4) - 17 = ?
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 8.9s | Response: 32 chars
+[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
+[LocalLLM] locate_target: Element not found by VLM
+   📍 Element: (1019, 51) | TRM: (1131, 230) | dist=211px [element]
+   🖱️ Click @ (1019, 51)
+   ✓ reward=0.24 (dist_r=0.00 vis_r=0.80)
+
+   Step 4/5: Solve: (25 * 4) - 17 = ?
+[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
+[LocalLLM] ⏱️ 13.5s | Response: 32 chars
+[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
+[LocalLLM] locate_target: Element not found by VLM
+   📍 Element: (492, 931) | TRM: (944, 461) | dist=652px [element]
+   🖱️ Click @ (492, 931)
+   ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)

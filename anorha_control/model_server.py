@@ -161,6 +161,19 @@ def get_model_path(model_key: str) -> Optional[Path]:
     return None
 
 
+def get_mmproj_path(gguf_path: Path, model_key: str) -> Optional[Path]:
+    """Find mmproj (vision encoder) file next to a VLM GGUF. Required for split models."""
+    model = MODELS.get(model_key)
+    if not model or model.get("type") != "vlm":
+        return None
+    
+    parent = gguf_path.parent
+    # Look for mmproj*.gguf in same directory (e.g. mmproj-Qwen3VL-1B-Instruct-F16.gguf)
+    for f in parent.glob("mmproj*.gguf"):
+        return f
+    return None
+
+
 # =============================================================================
 # SERVER MANAGEMENT
 # =============================================================================
@@ -257,8 +270,15 @@ class ServerManager:
             "-ngl", str(gpu_layers),
         ]
         
+        # Add mmproj for VLM split models (vision encoder separate from LLM)
+        mmproj = get_mmproj_path(model_path, model_key)
+        if mmproj:
+            cmd.extend(["--mmproj", str(mmproj)])
+        
         print(f"🚀 Starting llama.cpp server...")
         print(f"   Model: {model_path.name}")
+        if mmproj:
+            print(f"   Vision: {mmproj.name}")
         print(f"   Port: {port}")
         print(f"   GPU layers: {gpu_layers}")
         
