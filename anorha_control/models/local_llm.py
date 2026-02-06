@@ -76,6 +76,7 @@ class LocalLLM:
     ) -> str:
         """
         Generate text from the LLM, optionally with vision.
+        Uses /api/chat for vision (more reliable) and /api/generate for text-only.
         """
         if not self.available:
             return ""
@@ -84,30 +85,50 @@ class LocalLLM:
         if not thinking:
             prompt = prompt + "\n\n/no_think"
         
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "keep_alive": self.keep_alive,  # Keep model loaded in VRAM
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-            }
-        }
-        
-        if system:
-            payload["system"] = system
-        
-        if images:
-            payload["images"] = images
-        
         try:
             import time as time_module
             start_time = time_module.time()
-            print(f"[LocalLLM] Calling {self.model} (images={len(images) if images else 0})...")
+            
+            # Use /api/chat for vision (more reliable with qwen3-vl)
+            if images:
+                # Ensure base64 has no newlines
+                clean_images = [img.replace('\n', '').replace('\r', '') for img in images]
+                
+                messages = [{"role": "user", "content": prompt, "images": clean_images}]
+                if system:
+                    messages.insert(0, {"role": "system", "content": system})
+                
+                payload = {
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "keep_alive": self.keep_alive,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    }
+                }
+                endpoint = "/api/chat"
+                print(f"[LocalLLM] Calling {self.model} via /chat (images={len(clean_images)})...")
+            else:
+                # Use /api/generate for text-only (faster)
+                payload = {
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "keep_alive": self.keep_alive,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    }
+                }
+                if system:
+                    payload["system"] = system
+                endpoint = "/api/generate"
+                print(f"[LocalLLM] Calling {self.model} via /generate...")
             
             response = requests.post(
-                f"{self.base_url}/api/generate",
+                f"{self.base_url}{endpoint}",
                 json=payload,
                 timeout=self.timeout,
             )
@@ -123,15 +144,19 @@ class LocalLLM:
             
             if response.status_code == 200:
                 result = response.json()
-                text = result.get("response", "").strip()
+                # /api/chat returns message.content, /api/generate returns response
+                if images:
+                    text = result.get("message", {}).get("content", "").strip()
+                else:
+                    text = result.get("response", "").strip()
                 
                 # Show thinking if present (between <think> tags)
                 if "<think>" in text and "</think>" in text:
                     think_start = text.find("<think>") + 7
                     think_end = text.find("</think>")
-                    thinking = text[think_start:think_end].strip()
-                    if thinking:
-                        print(f"[LocalLLM] 💭 Thinking: {thinking[:100]}...")
+                    thinking_text = text[think_start:think_end].strip()
+                    if thinking_text:
+                        print(f"[LocalLLM] 💭 Thinking: {thinking_text[:100]}...")
                     # Remove thinking from output
                     text = text[:text.find("<think>")] + text[text.find("</think>")+8:]
                     text = text.strip()
