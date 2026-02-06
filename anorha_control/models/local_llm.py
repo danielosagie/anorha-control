@@ -146,19 +146,33 @@ class LocalLLM:
             
             if response.status_code == 200:
                 result = response.json()
+                
+                # Check for Ollama error response (HTTP 200 with error field)
+                if "error" in result:
+                    print(f"[LocalLLM] ⏱️ {time_str} | Ollama error: {result['error']}")
+                    return ""
+                
                 # /api/chat returns message.content, /api/generate returns response
                 if images:
-                    text = result.get("message", {}).get("content", "").strip()
+                    message = result.get("message", {})
+                    text = message.get("content", "").strip()
+                    
+                    # Qwen3-VL uses a separate "thinking" field - extract content from there if main content is empty
+                    thinking_text = message.get("thinking", "").strip()
+                    if not text and thinking_text:
+                        print(f"[LocalLLM] 💭 Thinking mode detected ({len(thinking_text)} chars)")
+                        # Try to extract JSON from thinking text (VLM often puts the answer in thinking)
+                        text = thinking_text
                 else:
                     text = result.get("response", "").strip()
                 
-                # Show thinking if present (between <think> tags)
+                # Show thinking if present (between <think> tags) - legacy format
                 if "<think>" in text and "</think>" in text:
                     think_start = text.find("<think>") + 7
                     think_end = text.find("</think>")
-                    thinking_text = text[think_start:think_end].strip()
-                    if thinking_text:
-                        print(f"[LocalLLM] 💭 Thinking: {thinking_text[:100]}...")
+                    thinking_content = text[think_start:think_end].strip()
+                    if thinking_content:
+                        print(f"[LocalLLM] 💭 Thinking: {thinking_content[:100]}...")
                     # Remove thinking from output
                     text = text[:text.find("<think>")] + text[text.find("</think>")+8:]
                     text = text.strip()
@@ -330,21 +344,21 @@ Be concise. Output ONLY valid JSON, no explanation."""
         img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
         # Simplified, direct prompt that works better with qwen3-vl
-        prompt = f"""Look at this screenshot and find: {target_description}
+        # Note: Must be very direct since model uses thinking mode
+        prompt = f"""Find the element: "{target_description}"
 
-Output the CENTER pixel coordinates as JSON only:
-{{"x": <number 0-999>, "y": <number 0-999>, "found": true}}
+Look at the image (1000x1000 pixels) and output ONLY this JSON:
+{{"x": <center_x>, "y": <center_y>, "found": true}}
 
-If you cannot find it, output:
-{{"x": 0, "y": 0, "found": false}}
+If not found: {{"x": 0, "y": 0, "found": false}}
 
-The image is 1000x1000 pixels. Output JSON only, no other text."""
+JSON:"""
         
         response = self.generate(
             prompt, 
             images=[img_base64], 
-            temperature=0.1,  # Small variance for creativity
-            max_tokens=100,
+            temperature=0.1,
+            max_tokens=512,  # Increased for thinking + JSON output
         )
         
         # Debug: log raw response
