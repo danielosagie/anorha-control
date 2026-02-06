@@ -31,15 +31,18 @@ class StrategicPlanner:
     
     def __init__(
         self,
-        model: str = "glm-4.7-flash:latest",
+        model: str = "qwen3:8b",  # Faster text-only planner
         base_url: str = "http://localhost:11434",
-        timeout: float = 180.0,  # GLM 19GB needs more time especially on CPU
+        timeout: float = 120.0,  # Reasonable for 8B
+        keep_alive: str = "-1",  # Keep model loaded in VRAM
     ):
         self.model = model
         self.base_url = base_url
         self.timeout = timeout
+        self.keep_alive = keep_alive
         self._available: Optional[bool] = None
-        self._fallback_model = "qwen2.5vl:7b"
+        self._fallback_model = "qwen3-vl:4b"  # VLM fallback
+        print(f"[StrategicPlanner] Using model: {model} (keep_alive={keep_alive})")
     
     @property
     def available(self) -> bool:
@@ -78,6 +81,7 @@ class StrategicPlanner:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,  # Keep model loaded
             "options": {
                 "temperature": 0.3,
                 "num_predict": 1024,

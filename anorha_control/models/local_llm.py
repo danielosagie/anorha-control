@@ -31,21 +31,24 @@ class LocalLLM:
     
     def __init__(
         self,
-        model: str = "qwen3-vl:4b",
+        model: str = "qwen3-vl:2b",  # 2B is fast on GPU
         base_url: str = "http://localhost:11434",
-        timeout: float = 120.0,  # Increased for large models on CPU
+        timeout: float = 60.0,  # Reasonable timeout for 2B model
+        keep_alive: str = "-1",  # Keep model loaded in VRAM (-1 = forever)
     ):
         self.model = model
         self.base_url = base_url
+        self.keep_alive = keep_alive
         
         # Auto-detect large models and increase timeout
-        if any(size in model.lower() for size in ["7b", "8b", "13b", "19b", "70b", "latest"]):
+        if any(size in model.lower() for size in ["7b", "8b", "13b", "19b", "70b"]):
             self.timeout = max(timeout, 180.0)  # 3 minutes for large models
-            print(f"[LocalLLM] Large model detected, timeout={self.timeout}s")
+            print(f"[LocalLLM] Large model detected ({model}), timeout={self.timeout}s")
         else:
             self.timeout = timeout
         
         self._available: Optional[bool] = None
+        print(f"[LocalLLM] Using model: {model} (keep_alive={keep_alive})")
     
     @property
     def available(self) -> bool:
@@ -85,6 +88,7 @@ class LocalLLM:
             "model": self.model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,  # Keep model loaded in VRAM
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
