@@ -102,25 +102,49 @@ class LocalLLM:
             payload["images"] = images
         
         try:
+            import time as time_module
+            start_time = time_module.time()
             print(f"[LocalLLM] Calling {self.model} (images={len(images) if images else 0})...")
+            
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
                 timeout=self.timeout,
             )
             
+            elapsed = time_module.time() - start_time
+            # Format time nicely
+            if elapsed < 1:
+                time_str = f"{elapsed*1000:.0f}ms"
+            elif elapsed < 60:
+                time_str = f"{elapsed:.1f}s"
+            else:
+                time_str = f"{elapsed/60:.1f}min"
+            
             if response.status_code == 200:
                 result = response.json()
                 text = result.get("response", "").strip()
+                
+                # Show thinking if present (between <think> tags)
+                if "<think>" in text and "</think>" in text:
+                    think_start = text.find("<think>") + 7
+                    think_end = text.find("</think>")
+                    thinking = text[think_start:think_end].strip()
+                    if thinking:
+                        print(f"[LocalLLM] 💭 Thinking: {thinking[:100]}...")
+                    # Remove thinking from output
+                    text = text[:text.find("<think>")] + text[text.find("</think>")+8:]
+                    text = text.strip()
+                
                 if text:
-                    print(f"[LocalLLM] Got response: {len(text)} chars")
+                    print(f"[LocalLLM] ⏱️ {time_str} | Response: {len(text)} chars")
                 else:
-                    print(f"[LocalLLM] Empty response from {self.model}")
+                    print(f"[LocalLLM] ⏱️ {time_str} | Empty response from {self.model}")
                 return text
             else:
-                print(f"[LocalLLM] API error: status={response.status_code}, body={response.text[:200]}")
+                print(f"[LocalLLM] ⏱️ {time_str} | API error: status={response.status_code}, body={response.text[:200]}")
         except requests.exceptions.Timeout:
-            print(f"[LocalLLM] Timeout after {self.timeout}s - increase timeout or use smaller model")
+            print(f"[LocalLLM] ⏱️ Timeout after {self.timeout}s - increase timeout or use smaller model")
         except Exception as e:
             print(f"[LocalLLM] Error: {type(e).__name__}: {e}")
         
