@@ -31,7 +31,7 @@ class StrategicPlanner:
         model: str = "qwen3:4b",  # Fast text planner (GPU-optimized)
         base_url: str = "http://localhost:11434",
         timeout: float = 120.0,  # Reasonable for 8B
-        keep_alive: str = "-1",  # Keep model loaded in VRAM
+        keep_alive: str = "24h",  # Keep model loaded for 24 hours
     ):
         self.model = model
         self.base_url = base_url

@@ -34,7 +34,7 @@ class LocalLLM:
         model: str = "qwen3-vl:2b",  # 2B is fast on GPU
         base_url: str = "http://localhost:11434",
         timeout: float = 60.0,  # Reasonable timeout for 2B model
-        keep_alive: str = "-1",  # Keep model loaded in VRAM (-1 = forever)
+        keep_alive: str = "24h",  # Keep model loaded for 24 hours
     ):
         self.model = model
         self.base_url = base_url
