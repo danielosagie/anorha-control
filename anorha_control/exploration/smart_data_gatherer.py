@@ -192,6 +192,42 @@ class SmartDataGatherer:
         # Load existing progress
         self._load_progress()
     
+    def _check_vlm_connection(self):
+        """Check if VLM backend is available and show helpful message if not."""
+        import requests
+        
+        backend = self.config.vlm_backend
+        url = self.config.vlm_url
+        
+        if backend == "llamacpp":
+            try:
+                r = requests.get(f"{url}/health", timeout=2)
+                if r.status_code == 200:
+                    print(f"[VLM] ✅ llama.cpp server running at {url}")
+                    return True
+            except:
+                pass
+            
+            print(f"[VLM] ⚠️ llama.cpp server not responding at {url}")
+            print(f"      Start it with: llama-server.exe -m <model.gguf> --port 8080 -ngl 99")
+            print(f"      Or use Ollama: remove --llamacpp flag")
+            
+        else:  # ollama
+            try:
+                r = requests.get(f"{url}/api/tags", timeout=2)
+                if r.status_code == 200:
+                    print(f"[VLM] ✅ Ollama running at {url}")
+                    return True
+            except:
+                pass
+            
+            print(f"[VLM] ⚠️ Ollama not responding at {url}")
+            print(f"      Start it with: ollama serve")
+            print(f"      Then run: ollama pull qwen3-vl:2b")
+        
+        return False
+
+    
     def _on_kill(self):
         print("\n🛑 Kill switch triggered!")
         self._killed = True
