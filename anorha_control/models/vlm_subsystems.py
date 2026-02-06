@@ -76,11 +76,13 @@ class VLMBackend:
     def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256) -> str:
         raise NotImplementedError
     
-    def _image_to_base64(self, img: Image.Image) -> str:
-        """Convert PIL image to base64."""
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        return base64.b64encode(buffer.getvalue()).decode()
+    # Ensure base64 is high quality but compressed for speed
+    buffer = io.BytesIO()
+    # Convert to RGB if needed (Windows screenshots can be RGBA or L)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(buffer, format="JPEG", quality=85)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
 class OllamaBackend(VLMBackend):
