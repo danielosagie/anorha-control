@@ -31,9 +31,9 @@ class LocalLLM:
     
     def __init__(
         self,
-        model: str = "qwen3-vl:2b",  # 2B is fast on GPU
+        model: str = "qwen2.5-vl:7b",  # 7B has reliable vision (2b/3-vl broken)
         base_url: str = "http://localhost:11434",
-        timeout: float = 60.0,  # Reasonable timeout for 2B model
+        timeout: float = 90.0,  # 7B needs more time
         keep_alive: str = "24h",  # Keep model loaded for 24 hours
     ):
         self.model = model
