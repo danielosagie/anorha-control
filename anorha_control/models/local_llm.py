@@ -81,10 +81,6 @@ class LocalLLM:
         if not self.available:
             return ""
         
-        # Add thinking control to prompt if supported
-        if not thinking:
-            prompt = prompt + "\n\n/no_think"
-        
         try:
             import time as time_module
             start_time = time_module.time()
@@ -94,6 +90,7 @@ class LocalLLM:
                 # Ensure base64 has no newlines
                 clean_images = [img.replace('\n', '').replace('\r', '') for img in images]
                 
+                # DON'T add /no_think for vision - it breaks qwen3-vl!
                 messages = [{"role": "user", "content": prompt, "images": clean_images}]
                 if system:
                     messages.insert(0, {"role": "system", "content": system})
@@ -112,9 +109,14 @@ class LocalLLM:
                 print(f"[LocalLLM] Calling {self.model} via /chat (images={len(clean_images)})...")
             else:
                 # Use /api/generate for text-only (faster)
+                # Add /no_think for qwen3 to disable thinking mode
+                text_prompt = prompt
+                if not thinking:
+                    text_prompt = prompt + "\n\n/no_think"
+                
                 payload = {
                     "model": self.model,
-                    "prompt": prompt,
+                    "prompt": text_prompt,
                     "stream": False,
                     "keep_alive": self.keep_alive,
                     "options": {
