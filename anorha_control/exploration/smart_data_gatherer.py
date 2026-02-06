@@ -133,7 +133,7 @@ class GathererConfig:
     # Data settings
     data_dir: Path = Path("data/trajectories")
     save_every: int = 10  # Save after N successful trajectories
-    target_trajectories: int = 5000
+    target_trajectories: int = 100000  # Target: 100k for good TRM training
     
     # Episode settings
     max_episode_steps: int = 15

@@ -136,22 +136,23 @@ class LlamaCppBackend(VLMBackend):
     
     def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256) -> str:
         if not self.available:
+            print(f"[llama.cpp] Server not available at {self.base_url}")
             return ""
         
         img_base64 = self._image_to_base64(image)
         
-        # llama.cpp uses OpenAI-compatible API
+        # llama.cpp uses OpenAI-compatible API with multimodal content
         payload = {
-            "model": self.model,
             "messages": [{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
                 ]
             }],
             "max_tokens": max_tokens,
-            "temperature": 0.1
+            "temperature": 0.1,
+            "stream": False
         }
         
         try:
@@ -160,8 +161,18 @@ class LlamaCppBackend(VLMBackend):
                 json=payload,
                 timeout=self.timeout
             )
+            
+            if response.status_code != 200:
+                print(f"[llama.cpp] HTTP {response.status_code}: {response.text[:200]}")
+                return ""
+            
             result = response.json()
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            if not content:
+                print(f"[llama.cpp] Empty response. Full result: {str(result)[:300]}")
+            
+            return content
         except Exception as e:
             print(f"[llama.cpp] Error: {e}")
             return ""
