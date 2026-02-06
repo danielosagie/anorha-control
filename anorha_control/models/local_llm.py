@@ -100,8 +100,9 @@ class LocalLLM:
         
         if images:
             payload["images"] = images
-            
+        
         try:
+            print(f"[LocalLLM] Calling {self.model} (images={len(images) if images else 0})...")
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
@@ -110,9 +111,18 @@ class LocalLLM:
             
             if response.status_code == 200:
                 result = response.json()
-                return result.get("response", "").strip()
+                text = result.get("response", "").strip()
+                if text:
+                    print(f"[LocalLLM] Got response: {len(text)} chars")
+                else:
+                    print(f"[LocalLLM] Empty response from {self.model}")
+                return text
+            else:
+                print(f"[LocalLLM] API error: status={response.status_code}, body={response.text[:200]}")
+        except requests.exceptions.Timeout:
+            print(f"[LocalLLM] Timeout after {self.timeout}s - increase timeout or use smaller model")
         except Exception as e:
-            print(f"[LocalLLM] Error: {e}")
+            print(f"[LocalLLM] Error: {type(e).__name__}: {e}")
         
         return ""
     
