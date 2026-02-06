@@ -283,6 +283,74 @@ class SandboxExplorer:
         
         return reward, success
     
+    async def _ensure_viewport(self):
+        """
+        Detect and repair viewport changes.
+        Called at the start of each step to handle window resizes.
+        """
+        try:
+            current_size = self._page.viewport_size
+            if current_size:
+                expected_w = self.config.viewport_width
+                expected_h = self.config.viewport_height
+                actual_w = current_size.get('width', expected_w)
+                actual_h = current_size.get('height', expected_h)
+                
+                if actual_w != expected_w or actual_h != expected_h:
+                    print(f"   ⚠️ Viewport changed: {actual_w}x{actual_h} → adapting")
+                    # Update config to match actual viewport
+                    self.config.viewport_width = actual_w
+                    self.config.viewport_height = actual_h
+        except Exception as e:
+            # Viewport check is non-critical
+            pass
+    
+    async def _attempt_recovery(self, failed_count: int) -> bool:
+        """
+        Try recovery strategies when stuck after multiple failures.
+        Returns True if recovery was attempted.
+        """
+        strategies = [
+            ("scroll_down", self._recovery_scroll_down),
+            ("scroll_up", self._recovery_scroll_up),
+            ("go_back", self._recovery_go_back),
+            ("click_random", self._recovery_click_random),
+        ]
+        
+        # Cycle through strategies based on failure count
+        strategy_idx = (failed_count - 1) % len(strategies)
+        name, action_fn = strategies[strategy_idx]
+        
+        print(f"   🔄 Recovery attempt #{failed_count}: {name}")
+        try:
+            await action_fn()
+            await asyncio.sleep(0.5)
+            return True
+        except Exception as e:
+            print(f"   ❌ Recovery failed: {e}")
+            return False
+    
+    async def _recovery_scroll_down(self):
+        """Recovery: scroll down to reveal more content."""
+        await self._page.mouse.wheel(0, 300)
+    
+    async def _recovery_scroll_up(self):
+        """Recovery: scroll up to return to previous view."""
+        await self._page.mouse.wheel(0, -300)
+    
+    async def _recovery_go_back(self):
+        """Recovery: navigate back to previous page."""
+        await self._page.go_back()
+    
+    async def _recovery_click_random(self):
+        """Recovery: click a random interactive element."""
+        elements = await self._get_page_elements()
+        if elements:
+            elem = random.choice(elements)
+            x, y = int(elem.get("x", 500)), int(elem.get("y", 400))
+            await self._page.mouse.click(x, y)
+            print(f"   🖱️ Random click @ ({x}, {y})")
+    
     async def _execute_action(self, action: Dict[str, Any]):
         """Execute action in the browser."""
         action_type = action.get("action_type", 0)
@@ -305,8 +373,23 @@ class SandboxExplorer:
                 # Click first, then type
                 await self._page.mouse.click(x, y)
                 await asyncio.sleep(0.2)
-                sample_texts = ["hello world", "test@example.com", "John Doe", "123 Main St", "New York"]
-                text = random.choice(sample_texts)
+                
+                # Use provided text from step, or fall back to sample data
+                text = action.get("text_to_type", "")
+                if not text and self.current_task and self.current_task.sample_data:
+                    # Try to find relevant text from sample_data
+                    data = self.current_task.sample_data
+                    # Priority order for common fields
+                    for key in ["username", "email", "user", "name", "password", "query", "first", "address"]:
+                        if key in data and data[key]:
+                            text = str(data[key])
+                            break
+                
+                if not text:
+                    # Last resort fallback
+                    sample_texts = ["test@example.com", "John Doe", "123 Main St"]
+                    text = random.choice(sample_texts)
+                    
                 await self._page.keyboard.type(text, delay=50)
                 print(f"   ⌨️ Type '{text}' @ ({x}, {y})")
                 
@@ -414,14 +497,28 @@ class SandboxExplorer:
         print(f"   Site: {self.current_site}")
         print(f"   Task: {self.current_instruction}")
         
-        # VLM Planning - get step list
+        # VLM Planning - get step list with task context
         current_plan = []
         if self.planner and self.planner.llm.available:
             print("   🧠 VLM Planning...")
             planning_img = await self._screenshot()
-            current_plan = self.planner.plan_task_with_vision(self.current_instruction, planning_img)
+            
+            # Pass sample_data for context-aware planning
+            sample_data = self.current_task.sample_data if self.current_task else {}
+            current_plan = self.planner.plan_task_with_vision(
+                self.current_instruction, 
+                planning_img,
+                sample_data=sample_data
+            )
             if current_plan:
-                print(f"   📝 Plan: {[s.target for s in current_plan[:5]]}...")
+                # Show plan with values for debugging
+                plan_summary = []
+                for s in current_plan[:5]:
+                    if s.value:
+                        plan_summary.append(f"{s.action}({s.target})='{s.value}'")
+                    else:
+                        plan_summary.append(s.target)
+                print(f"   📝 Plan: {plan_summary}...")
         
         max_steps = min(self.config.max_episode_steps, max(5, len(current_plan) + 2))
         consecutive_failures = 0
@@ -436,19 +533,29 @@ class SandboxExplorer:
                 await asyncio.sleep(0.5)
             
             # Determine target for this step
+            step_value = None  # Text to type for this step
             if step_idx < len(current_plan):
                 step = current_plan[step_idx]
                 step_instruction = f"{step.action} {step.target}"
                 target_description = step.target
+                step_value = step.value  # Preserve the value from VLM planning
             else:
                 step_instruction = self.current_instruction
                 target_description = self.current_instruction
             
-            print(f"\n   Step {step_idx + 1}/{max_steps}: {step_instruction}")
+            # Show step with value if typing
+            if step_value:
+                print(f"\n   Step {step_idx + 1}/{max_steps}: {step_instruction} → type '{step_value}'")
+            else:
+                print(f"\n   Step {step_idx + 1}/{max_steps}: {step_instruction}")
+            
+            # Check and adapt to viewport changes
+            await self._ensure_viewport()
             
             # Capture screenshot
             before_img = await self._screenshot()
             before_path = self._save_screenshot(before_img, "before")
+            state_hash_before = phash_image(before_img)
             state_hash_before = phash_image(before_img)
             
             # Get elements for context
@@ -555,6 +662,7 @@ class SandboxExplorer:
                 "trm_y": trm_py,
                 "vlm_x": vlm_x,
                 "vlm_y": vlm_y,
+                "text_to_type": step_value,  # Pass VLM-planned text for typing
             }
             
             await self._execute_action(action)
@@ -579,11 +687,17 @@ class SandboxExplorer:
                 reward = visual_reward
                 success = visual_success
             
-            # Track consecutive failures
+            # Track consecutive failures - try recovery before giving up
             if success:
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
+                # Try recovery if failing too much (but not yet at limit)
+                if consecutive_failures == 3:
+                    print("   🔄 Trying recovery strategies...")
+                    await self._attempt_recovery(consecutive_failures)
+                    # Reset counter to give one more chance
+                    consecutive_failures = 1
             
             status = "✓" if success else "✗"
             print(f"   {status} reward={reward:.2f} (dist_r={distance_reward:.2f} vis_r={visual_reward:.2f})")

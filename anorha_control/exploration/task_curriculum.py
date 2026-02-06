@@ -16,6 +16,7 @@ class TaskCategory(Enum):
     NAVIGATION = "navigation"    # Site exploration, search
     ECOMMERCE = "ecommerce"      # Shopping flows, checkout
     LONGHORIZON = "longhorizon"  # Multi-step complex tasks
+    REALWORLD = "realworld"      # Real sites like Google, Airbnb, etc.
 
 
 class Difficulty(Enum):
@@ -376,6 +377,88 @@ LONGHORIZON_TASKS = [
 
 
 # =============================================================================
+# REAL-WORLD TASKS - Complex real-world scenarios
+# =============================================================================
+
+REALWORLD_TASKS = [
+    Task(
+        name="Google Flights - Search Flights",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.HARD,
+        site="https://www.google.com/travel/flights",
+        objective="Search for round-trip flights from San Francisco to Tokyo for next month",
+        success_hints=["Flight results", "Prices shown", "Departure", "SFO", "TYO"],
+        max_steps=20,
+        sample_data={
+            "from": "San Francisco",
+            "to": "Tokyo",
+            "departure_date": "next month",
+            "trip_type": "round-trip",
+        },
+    ),
+    Task(
+        name="Airbnb - Browse Listings",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.HARD,
+        site="https://www.airbnb.com/",
+        objective="Search for a place to stay in Paris for 2 guests, browse listings",
+        success_hints=["Listings", "Paris", "guests", "Price", "Results"],
+        max_steps=25,
+        sample_data={
+            "location": "Paris, France",
+            "guests": "2",
+            "check_in": "next month",
+        },
+    ),
+    Task(
+        name="LinkedIn - Job Search (Public)",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.HARD,
+        site="https://www.linkedin.com/jobs/search/",
+        objective="Search for 'Software Engineer' jobs in 'Remote' location",
+        success_hints=["Job listings", "Software Engineer", "Remote", "Apply"],
+        max_steps=20,
+        sample_data={
+            "job_title": "Software Engineer",
+            "location": "Remote",
+        },
+    ),
+    Task(
+        name="Product Hunt - Browse Today",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.MEDIUM,
+        site="https://www.producthunt.com/",
+        objective="Browse today's top products and click on the #1 product",
+        success_hints=["Product page", "Upvotes", "Comments", "Details"],
+        max_steps=15,
+    ),
+    Task(
+        name="GitHub - Search Repository",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.MEDIUM,
+        site="https://github.com/search",
+        objective="Search for 'machine learning' repositories and view the top result",
+        success_hints=["Repository", "Stars", "README", "Code"],
+        max_steps=15,
+        sample_data={"query": "machine learning"},
+    ),
+    Task(
+        name="Booking.com - Hotel Search",
+        category=TaskCategory.REALWORLD,
+        difficulty=Difficulty.HARD,
+        site="https://www.booking.com/",
+        objective="Search for hotels in Barcelona, Spain for 2 adults",
+        success_hints=["Hotels", "Barcelona", "Price", "Availability", "Rating"],
+        max_steps=25,
+        sample_data={
+            "location": "Barcelona, Spain",
+            "guests": "2 adults",
+        },
+    ),
+]
+
+
+# =============================================================================
 # CURRICULUM CLASS
 # =============================================================================
 
@@ -403,16 +486,18 @@ class TaskCurriculum:
         TaskCategory.NAVIGATION: NAVIGATION_TASKS,
         TaskCategory.ECOMMERCE: ECOMMERCE_TASKS,
         TaskCategory.LONGHORIZON: LONGHORIZON_TASKS,
+        TaskCategory.REALWORLD: REALWORLD_TASKS,
     }
     
     # Category weights for balanced training
     CATEGORY_WEIGHTS = {
         TaskCategory.PRECISION: 0.35,   # Most important for TRM accuracy
         TaskCategory.TYPING: 0.15,
-        TaskCategory.FORMS: 0.20,
-        TaskCategory.NAVIGATION: 0.15,
-        TaskCategory.ECOMMERCE: 0.10,
+        TaskCategory.FORMS: 0.15,
+        TaskCategory.NAVIGATION: 0.10,
+        TaskCategory.ECOMMERCE: 0.05,
         TaskCategory.LONGHORIZON: 0.05,
+        TaskCategory.REALWORLD: 0.15,   # High weight for real-world application
     }
     
     def __init__(self, max_difficulty: Difficulty = Difficulty.MEDIUM):

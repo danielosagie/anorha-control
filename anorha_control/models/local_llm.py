@@ -194,36 +194,67 @@ class LocalLLM:
     def plan_task_with_vision(
         self, 
         instruction: str, 
-        screenshot: Image.Image
+        screenshot: Image.Image,
+        sample_data: Dict[str, Any] = None,  # Provided credentials/form values
     ) -> List[TaskStep]:
         """
-        Plan a task using the VLM's vision capabilities.
+        Plan a task using the VLM's vision capabilities with full context.
         
         Args:
             instruction: What to do
             screenshot: PIL Image of the current screen
+            sample_data: Dict with credentials, form values, task hints
             
         Returns:
-            List of TaskStep objects
+            List of TaskStep objects with specific, executable steps
         """
         # Convert PIL to base64
         buffered = io.BytesIO()
         screenshot.save(buffered, format="PNG")
         img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
-        system = """You are a GUI automation assistant with vision. 
-Analyze the image and the task. Output a JSON array of steps.
-Each step has: action (click/type/scroll/wait), target (description of what to interact with), value (for type), reason.
-Be extremely precise based on the visual evidence.
-Output ONLY valid JSON."""
+        # Build context-aware data section
+        data_context = ""
+        if sample_data:
+            data_context = "\n\nPROVIDED DATA (use these exact values):\n"
+            for key, value in sample_data.items():
+                data_context += f"- {key}: {value}\n"
+        
+        # Get task-specific decomposition hints
+        decomposition_hints = self._get_task_decomposition_hints(instruction, sample_data or {})
+        
+        system = """You are a GUI automation assistant with vision.
+Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
 
-        prompt = f"Analyze this screen and plan the task: {instruction}"
+CRITICAL RULES:
+1. For typing: Put the EXACT text to type in the "value" field
+2. For calculators: ONE step per action (type "2", type "5", click "×", type "4", click "=")
+3. For login/forms: Use the PROVIDED credentials exactly, not placeholder text
+4. Read ANY visible text on the page (credentials, hints, instructions)
+5. Each step must be a single mouse click or keyboard action
+
+OUTPUT FORMAT - JSON array:
+[{"action": "click|type|scroll", "target": "specific element", "value": "text to type", "reason": "why"}]
+
+action types:
+- click: mouse click on element
+- type: keyboard input (always include "value" with exact text)
+- scroll: scroll the page"""
+
+        prompt = f"""Task: {instruction}{data_context}
+{decomposition_hints}
+
+Look at the screenshot carefully. Read any visible credentials or instructions.
+Create specific, executable steps. For typing, specify EXACT text in "value".
+
+Output JSON array:"""
         
         response = self.generate(
             prompt, 
             system=system, 
             images=[img_base64], 
-            temperature=0.1
+            temperature=0.1,
+            max_tokens=1024,  # More tokens for detailed steps
         )
         
         # Parse JSON
@@ -245,6 +276,63 @@ Output ONLY valid JSON."""
             print(f"[LocalLLM] Failed to parse steps from: {response[:100]}...")
             
         return []
+    
+    def _get_task_decomposition_hints(self, instruction: str, sample_data: Dict[str, Any]) -> str:
+        """Generate task-specific decomposition hints for the VLM."""
+        instruction_lower = instruction.lower()
+        
+        # Calculator pattern
+        if "solve:" in instruction_lower or any(op in instruction for op in ['+', '-', '*', '/', '=']):
+            # Extract the expression if present
+            expr = sample_data.get("expression", "")
+            return f"""
+CALCULATOR TASK:
+- First, look for number input fields or digit buttons
+- Type/click each digit separately (for "25", type "2" then "5" OR click buttons 2, 5)
+- Click the operator button (×, +, -, ÷) - don't type it
+- After all numbers and operators, click "=" or "Calculate"
+{f'- Expression to solve: {expr}' if expr else ''}"""
+        
+        # Login pattern
+        if "login" in instruction_lower:
+            username = sample_data.get("username", sample_data.get("user", ""))
+            password = sample_data.get("password", "")
+            if username and password:
+                return f"""
+LOGIN TASK (use these exact credentials):
+1. Click the username/email input field
+2. Type exactly: {username}
+3. Click the password input field  
+4. Type exactly: {password}
+5. Click the login/submit/sign-in button"""
+        
+        # Form filling
+        if "form" in instruction_lower or "fill" in instruction_lower:
+            hints = "\nFORM TASK:\n"
+            for key, value in sample_data.items():
+                if key not in ["expression", "answer"]:
+                    hints += f"- For {key} field, type: {value}\n"
+            return hints if len(hints) > 15 else ""
+        
+        # Search pattern
+        if "search" in instruction_lower:
+            query = sample_data.get("query", "")
+            return f"""
+SEARCH TASK:
+1. Click the search box/field
+2. Type the search query{f': {query}' if query else ''}
+3. Click search button OR press Enter"""
+        
+        # Checkout/ecommerce
+        if "checkout" in instruction_lower or "buy" in instruction_lower or "cart" in instruction_lower:
+            return """
+ECOMMERCE TASK:
+1. Look for "Add to Cart" or similar buttons
+2. After adding, look for cart icon or "View Cart"
+3. In cart, find "Checkout" or "Proceed" button
+4. Fill form fields with provided data"""
+        
+        return ""
     
     def plan_task(self, instruction: str, screen_description: str = "") -> List[TaskStep]:
         """
@@ -505,13 +593,18 @@ class TaskPlanner:
         # Default: just click
         return [TaskStep("click", instruction, reason="Execute instruction")]
     
-    def plan_task_with_vision(self, instruction: str, screenshot: Image.Image) -> List[TaskStep]:
+    def plan_task_with_vision(
+        self, 
+        instruction: str, 
+        screenshot: Image.Image,
+        sample_data: Dict[str, Any] = None,
+    ) -> List[TaskStep]:
         """
-        Plan a task using vision.
+        Plan a task using vision with context awareness.
         Delegates to LLM if available, otherwise falls back to rules.
         """
         if self.llm and self.llm.available:
-            steps = self.llm.plan_task_with_vision(instruction, screenshot)
+            steps = self.llm.plan_task_with_vision(instruction, screenshot, sample_data)
             if steps:
                 return steps
         
