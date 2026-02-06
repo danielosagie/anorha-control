@@ -278,8 +278,15 @@ Be VERY precise with pixel coordinates based on the visual."""
             system=system, 
             images=[img_base64], 
             temperature=0.0,  # Deterministic
-            max_tokens=100,
+            max_tokens=150,  # More room for response
         )
+        
+        # Debug: log raw response
+        if response:
+            print(f"[LocalLLM] locate_target raw: {response[:200]}")
+        else:
+            print(f"[LocalLLM] locate_target: No response from VLM")
+            return None
         
         # Parse JSON response
         try:
@@ -288,12 +295,19 @@ Be VERY precise with pixel coordinates based on the visual."""
             if start >= 0 and end > start:
                 result = json.loads(response[start:end])
                 if result.get("found", False):
+                    x = int(result.get("x", 0))
+                    y = int(result.get("y", 0))
+                    print(f"[LocalLLM] locate_target: Found at ({x}, {y})")
                     return {
-                        "x": int(result.get("x", 0)),
-                        "y": int(result.get("y", 0)),
+                        "x": x,
+                        "y": y,
                         "confidence": float(result.get("confidence", 0.5)),
                         "found": True,
                     }
+                else:
+                    print(f"[LocalLLM] locate_target: Element not found by VLM")
+            else:
+                print(f"[LocalLLM] locate_target: No JSON in response")
         except (json.JSONDecodeError, ValueError) as e:
             print(f"[LocalLLM] locate_target parse error: {e}")
         

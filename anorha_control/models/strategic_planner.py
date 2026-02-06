@@ -22,10 +22,7 @@ class StrategicPlanner:
     """
     Uses GLM 4.7 Flash for high-level task decomposition.
     Only called at episode start for complex, multi-step tasks.
-    
-    Model Sizes:
-    - glm4:19b-flash - Best for complex planning (requires 12GB+ VRAM)
-    - glm4:9b - Good balance (requires 6GB+ VRAM)
+   
     - qwen3:7b - Fallback if GLM unavailable
     """
     
