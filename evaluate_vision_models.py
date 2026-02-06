@@ -54,7 +54,7 @@ def test_model(model_name, img_b64):
     
     start = time.time()
     try:
-        res = requests.post("http://localhost:11434/api/chat", json=payload, timeout=60)
+        res = requests.post("http://localhost:11434/api/chat", json=payload, timeout=180)  # 3 min for cold start
         elapsed = time.time() - start
         
         if res.status_code == 200:

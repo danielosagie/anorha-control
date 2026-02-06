@@ -31,9 +31,9 @@ class LocalLLM:
     
     def __init__(
         self,
-        model: str = "qwen2.5-vl:7b",  # 7B has reliable vision (2b/3-vl broken)
+        model: str = "qwen2.5vl:7b",  # Correct name (no dash) per user's ollama list
         base_url: str = "http://localhost:11434",
-        timeout: float = 90.0,  # 7B needs more time
+        timeout: float = 180.0,  # 3 min for HDD model loading
         keep_alive: str = "24h",  # Keep model loaded for 24 hours
     ):
         self.model = model
