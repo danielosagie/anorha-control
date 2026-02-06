@@ -34,20 +34,28 @@ import platform
 # MODEL REGISTRY - Shorthand to model file/name mapping
 # =============================================================================
 
+# =============================================================================
+# MODEL REGISTRY - Shorthand to model file/name mapping
+# =============================================================================
+
 MODELS = {
-    # VLM models (for grounding/planning)
-    "qwen3-vl:1b": {
-        "gguf": "Qwen3-VL-1B-Merged-Q4_K_M.gguf",
-        "hf_repo": "vctorwei/Qwen3-VL-1B-Merged-Q4_K_M-GGUF",
-        "ollama": "qwen3-vl:2b",  # Ollama uses 2B version
-        "type": "vlm"
-    },
+    # VLM models (for grounding/planning) - Official Qwen3-VL from HuggingFace
+    # IMPORTANT: These require BOTH main gguf AND mmproj (vision encoder)
     "qwen3-vl:2b": {
-        "gguf": None,  # Use Ollama for 2B
+        "gguf": "Qwen3VL-2B-Instruct-Q4_K_M.gguf",
+        "mmproj": "mmproj-Qwen3VL-2B-Instruct-F16.gguf",  # Vision encoder - REQUIRED!
+        "hf_repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
         "ollama": "qwen3-vl:2b",
         "type": "vlm"
     },
-    # LLM models (for planning/orchestration)
+    "qwen3-vl:8b": {
+        "gguf": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+        "mmproj": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+        "hf_repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        "ollama": "qwen3-vl:8b",
+        "type": "vlm"
+    },
+    # LLM models (for planning/orchestration) - no mmproj needed
     "qwen3:4b": {
         "gguf": None,
         "ollama": "qwen3:4b",
@@ -61,9 +69,9 @@ MODELS = {
 }
 
 # Aliases
-MODELS["qwen-vl"] = MODELS["qwen3-vl:1b"]
-MODELS["qwen-vl-1b"] = MODELS["qwen3-vl:1b"]
-MODELS["vlm"] = MODELS["qwen3-vl:1b"]
+MODELS["qwen-vl"] = MODELS["qwen3-vl:2b"]
+MODELS["qwen-vl-2b"] = MODELS["qwen3-vl:2b"]
+MODELS["vlm"] = MODELS["qwen3-vl:2b"]
 
 
 # =============================================================================
@@ -161,17 +169,29 @@ def get_model_path(model_key: str) -> Optional[Path]:
     return None
 
 
-def get_mmproj_path(gguf_path: Path, model_key: str) -> Optional[Path]:
-    """Find mmproj (vision encoder) file next to a VLM GGUF. Required for split models."""
+def get_mmproj_path(model_key: str) -> Optional[Path]:
+    """Get path to mmproj (vision encoder) file for VLM models."""
     model = MODELS.get(model_key)
-    if not model or model.get("type") != "vlm":
+    if not model or not model.get("mmproj"):
         return None
     
-    parent = gguf_path.parent
-    # Look for mmproj*.gguf in same directory (e.g. mmproj-Qwen3VL-1B-Instruct-F16.gguf)
-    for f in parent.glob("mmproj*.gguf"):
-        return f
+    models_dir = find_models_dir()
+    mmproj_name = model["mmproj"]
+    
+    # Check direct path
+    direct = models_dir / mmproj_name
+    if direct.exists():
+        return direct
+    
+    # Check in subdirectory (HF download structure)
+    for subdir in models_dir.iterdir():
+        if subdir.is_dir():
+            candidate = subdir / mmproj_name
+            if candidate.exists():
+                return candidate
+    
     return None
+
 
 
 # =============================================================================
@@ -240,9 +260,15 @@ class ServerManager:
         if not prefer_ollama and model.get("gguf"):
             llamacpp = find_llamacpp()
             model_path = get_model_path(model_key)
+            mmproj_path = get_mmproj_path(model_key) if model.get("mmproj") else None
             
             if llamacpp and model_path:
-                return self._start_llamacpp(llamacpp, model_path, port, gpu_layers, model_key)
+                # Check for required mmproj
+                if model.get("mmproj") and not mmproj_path:
+                    print(f"⚠️ Vision encoder (mmproj) not found: {model['mmproj']}")
+                    print(f"   Download with: hf download {model['hf_repo']} --local-dir ~/models/")
+                else:
+                    return self._start_llamacpp(llamacpp, model_path, mmproj_path, port, gpu_layers, model_key)
             elif not model_path:
                 print(f"⚠️ GGUF model not found. Download with:")
                 print(f"   hf download {model['hf_repo']} --local-dir ~/models/")
@@ -258,6 +284,7 @@ class ServerManager:
         self,
         exe: Path,
         model_path: Path,
+        mmproj_path: Optional[Path],
         port: int,
         gpu_layers: int,
         model_key: str,
@@ -270,15 +297,14 @@ class ServerManager:
             "-ngl", str(gpu_layers),
         ]
         
-        # Add mmproj for VLM split models (vision encoder separate from LLM)
-        mmproj = get_mmproj_path(model_path, model_key)
-        if mmproj:
-            cmd.extend(["--mmproj", str(mmproj)])
+        # Add vision encoder for VLM models
+        if mmproj_path:
+            cmd.extend(["--mmproj", str(mmproj_path)])
         
         print(f"🚀 Starting llama.cpp server...")
         print(f"   Model: {model_path.name}")
-        if mmproj:
-            print(f"   Vision: {mmproj.name}")
+        if mmproj_path:
+            print(f"   Vision: {mmproj_path.name}")
         print(f"   Port: {port}")
         print(f"   GPU layers: {gpu_layers}")
         
