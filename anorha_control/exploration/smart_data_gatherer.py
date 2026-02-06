@@ -100,10 +100,10 @@ class GatheringProgress:
     
     @property
     def eta_hours(self) -> float:
-        if self.trajectories_per_hour == 0:
+        if self.trajectories_per_hour == 0 or self.success_rate == 0:
             return float('inf')
         remaining = self.target_trajectories - self.successful_trajectories
-        return remaining / (self.trajectories_per_hour * self.success_rate)
+        return remaining / (self.trajectories_per_hour * max(0.01, self.success_rate))
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -170,6 +170,9 @@ class SmartDataGatherer:
             base_url=self.config.vlm_url,
             backend_type=self.config.vlm_backend
         )
+        
+        # Check VLM availability
+        self._check_vlm_connection()
         
         # Task curriculum
         self.curriculum = TaskCurriculum(max_difficulty=self.config.max_difficulty)
