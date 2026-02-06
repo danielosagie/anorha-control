@@ -269,26 +269,31 @@ Be concise. Output ONLY valid JSON, no explanation."""
         Returns:
             Dict with {x, y, confidence, action_type} or None if not found
         """
-        # Convert PIL to base64
+        # Resize image to 1000x1000 for better VLM processing (qwen3-vl works best at this size)
+        original_size = screenshot.size
+        resized = screenshot.resize((1000, 1000), Image.Resampling.LANCZOS)
+        
+        # Convert resized PIL to base64
         buffered = io.BytesIO()
-        screenshot.save(buffered, format="PNG")
+        resized.save(buffered, format="PNG")
         img_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
-        system = f"""You are a precise UI element locator. 
-The image is {viewport_width}x{viewport_height} pixels.
-Find the element described and output its CENTER coordinates as JSON.
-Output ONLY: {{"x": <pixel_x>, "y": <pixel_y>, "confidence": <0.0-1.0>, "found": true/false}}
-If element not found, set found=false and x=0, y=0.
-Be VERY precise with pixel coordinates based on the visual."""
+        # Simplified, direct prompt that works better with qwen3-vl
+        prompt = f"""Look at this screenshot and find: {target_description}
 
-        prompt = f"Find this element and output its center pixel coordinates: {target_description}"
+Output the CENTER pixel coordinates as JSON only:
+{{"x": <number 0-999>, "y": <number 0-999>, "found": true}}
+
+If you cannot find it, output:
+{{"x": 0, "y": 0, "found": false}}
+
+The image is 1000x1000 pixels. Output JSON only, no other text."""
         
         response = self.generate(
             prompt, 
-            system=system, 
             images=[img_base64], 
-            temperature=0.0,  # Deterministic
-            max_tokens=150,  # More room for response
+            temperature=0.1,  # Small variance for creativity
+            max_tokens=100,
         )
         
         # Debug: log raw response
@@ -305,13 +310,16 @@ Be VERY precise with pixel coordinates based on the visual."""
             if start >= 0 and end > start:
                 result = json.loads(response[start:end])
                 if result.get("found", False):
-                    x = int(result.get("x", 0))
-                    y = int(result.get("y", 0))
-                    print(f"[LocalLLM] locate_target: Found at ({x}, {y})")
+                    # Scale from 0-999 range back to viewport dimensions
+                    x_norm = int(result.get("x", 0))
+                    y_norm = int(result.get("y", 0))
+                    x = int(x_norm * viewport_width / 1000)
+                    y = int(y_norm * viewport_height / 1000)
+                    print(f"[LocalLLM] locate_target: Found at ({x}, {y}) [scaled from {x_norm}, {y_norm}]")
                     return {
                         "x": x,
                         "y": y,
-                        "confidence": float(result.get("confidence", 0.5)),
+                        "confidence": float(result.get("confidence", 0.8)),
                         "found": True,
                     }
                 else:
