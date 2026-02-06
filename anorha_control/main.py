@@ -307,6 +307,15 @@ def main():
     stats_parser = subparsers.add_parser("stats", help="View database statistics")
     stats_parser.add_argument("--db", type=str, help="Database path")
     
+    # Gather command (VLM-guided data gathering)
+    gather_parser = subparsers.add_parser("gather", help="VLM-guided data gathering for TRM training")
+    gather_parser.add_argument("--target", type=int, default=5000, help="Target trajectories to collect")
+    gather_parser.add_argument("--visible", action="store_true", help="Show browser window")
+    gather_parser.add_argument("--model", type=str, default="qwen3-vl:2b", help="VLM model")
+    gather_parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
+    gather_parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp server URL")
+    gather_parser.add_argument("--difficulty", type=str, default="medium", choices=["easy", "medium", "hard", "expert"])
+    
     args = parser.parse_args()
     
     if args.command == "explore":
@@ -317,6 +326,45 @@ def main():
         run_test(args)
     elif args.command == "stats":
         asyncio.run(run_stats(args))
+    elif args.command == "gather":
+        asyncio.run(run_gather(args))
+
+
+async def run_gather(args):
+    """Run VLM-guided data gathering for TRM training."""
+    from anorha_control.exploration import SmartDataGatherer, GathererConfig
+    from .exploration.task_curriculum import Difficulty
+    
+    print("=" * 60)
+    print("🤖 ANORHA-CONTROL: Smart Data Gatherer")
+    print("   VLM-guided exploration for TRM training data")
+    print("=" * 60)
+    
+    # Map difficulty string to enum
+    difficulty_map = {
+        "easy": Difficulty.EASY,
+        "medium": Difficulty.MEDIUM,
+        "hard": Difficulty.HARD,
+        "expert": Difficulty.EXPERT
+    }
+    
+    config = GathererConfig(
+        headless=not args.visible,
+        target_trajectories=args.target,
+        vlm_model=args.model,
+        vlm_backend="llamacpp" if args.llamacpp else "ollama",
+        vlm_url=args.llamacpp_url if args.llamacpp else "http://localhost:11434",
+        max_difficulty=difficulty_map.get(args.difficulty, Difficulty.MEDIUM),
+    )
+    
+    print(f"\nConfiguration:")
+    print(f"   Target: {config.target_trajectories} trajectories")
+    print(f"   VLM: {config.vlm_model} via {config.vlm_backend}")
+    print(f"   Difficulty: {args.difficulty}")
+    print(f"   Data dir: {config.data_dir}")
+    
+    gatherer = SmartDataGatherer(config)
+    await gatherer.gather_data()
 
 
 async def run_stats(args):
