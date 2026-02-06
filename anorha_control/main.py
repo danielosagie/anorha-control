@@ -316,6 +316,10 @@ def main():
     gather_parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp server URL")
     gather_parser.add_argument("--difficulty", type=str, default="medium", choices=["easy", "medium", "hard", "expert"])
     
+    # Server command (model server management)
+    server_parser = subparsers.add_parser("server", help="Manage model servers (llama.cpp/Ollama)")
+    # Note: server command delegates to model_server.py which has its own subparsers
+    
     args = parser.parse_args()
     
     if args.command == "explore":
@@ -328,6 +332,10 @@ def main():
         asyncio.run(run_stats(args))
     elif args.command == "gather":
         asyncio.run(run_gather(args))
+    elif args.command == "server":
+        # Delegate to model_server module
+        from anorha_control import model_server
+        sys.exit(model_server.main())
 
 
 async def run_gather(args):
