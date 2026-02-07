@@ -50,8 +50,8 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
     endpoint = ""
     
     # Use generous but safe limits for reasoning models
-    max_tokens = 4000
-    context_window = 8192 
+    max_tokens = 8000
+    context_window = 16384 
     
     if backend == "ollama":
         endpoint = f"{url}/api/chat"
