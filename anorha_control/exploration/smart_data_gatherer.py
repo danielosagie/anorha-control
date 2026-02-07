@@ -188,12 +188,16 @@ class SmartDataGatherer:
         self._paused = False
         self._killed = False
         
-        # Overlay for hotkeys - configured for viewport size
+        # Overlay for hotkeys - configured for viewport size ONLY if visible
+        # If headless, we want it on the whole screen so user sees it
+        overlay_w = None if self.config.headless else self.config.viewport_width
+        overlay_h = None if self.config.headless else self.config.viewport_height
+        
         self.indicator = get_indicator(
             on_kill=self._on_kill, 
             on_pause=self._on_pause,
-            width=self.config.viewport_width,
-            height=self.config.viewport_height
+            width=overlay_w,
+            height=overlay_h
         )
         
         # Load existing progress
