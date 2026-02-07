@@ -2,46 +2,99 @@ import requests
 import base64
 import json
 import io
+import argparse
 from PIL import Image
 
-def test_vision():
-    # 1. Create a tiny red test image
-    img = Image.new('RGB', (100, 100), color='red')
+def test_vision(backend="ollama", url="http://localhost:11434", model="qwen2.5-vl:3b"):
+    print(f"\n🔍 Testing VLM Planning Capabilities")
+    print(f"   Backend: {backend}")
+    print(f"   URL: {url}")
+    print(f"   Model: {model}")
+    
+    # 1. Create a simple test image (Red box on white background)
+    img = Image.new('RGB', (800, 600), color='white')
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(img)
+    d.rectangle([100, 100, 200, 200], fill='red')
+    d.text((110, 110), "Login", fill="white")
+    
     buf = io.BytesIO()
     img.save(buf, format='JPEG')
     img_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
     
-    url = "http://localhost:8081/v1/chat/completions"
+    # 2. Construct Prompt (Planning Task)
+    prompt = """Task: Click on the red login button
+
+Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
+
+RULES:
+1. Each step = ONE click or ONE keyboard action
+2. Output JSON array:
+[{"action": "click", "target": "element description", "reason": "why"}]"""
+
+    payload = {}
+    endpoint = ""
     
-    payload = {
-        "model": "qwen3-vl:2b",  # Name doesn't matter much for llama.cpp usually
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What color is this image?"},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-            ]
-        }],
-        "max_tokens": 50
-    }
+    if backend == "ollama":
+        endpoint = f"{url}/api/chat"
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
+            "stream": False,
+            "options": {"temperature": 0.1}
+        }
+    else:  # llama.cpp
+        endpoint = f"{url}/v1/chat/completions"
+        payload = {
+            "model": model,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                ]
+            }],
+            "max_tokens": 512,
+            "temperature": 0.1
+        }
     
-    print(f"📡 Connecting to {url}...")
+    print(f"\n📡 Connecting to {endpoint}...")
     try:
-        response = requests.post(url, json=payload, timeout=10)
-        
-        print(f"\n✅ Status Code: {response.status_code}")
-        print(f"📜 Headers: {json.dumps(dict(response.headers), indent=2)}")
-        print(f"📦 Response Body:\n{response.text}")
-        
-        if response.status_code == 200:
-            print("\n🎉 SUCCESS! The server accepts images.")
+        if backend == "ollama":
+            response = requests.post(endpoint, json=payload, timeout=60)
+            result = response.json()
+            content = result.get("message", {}).get("content", "")
         else:
-            print("\n❌ FAILURE! The server rejected the image.")
-            print("   This confirms the server running on port 8081 does NOT have vision enabled.")
+            response = requests.post(endpoint, json=payload, timeout=60)
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
+        print(f"\n📦 RAW RESPONSE:\n{'-'*40}\n{content}\n{'-'*40}")
+        
+        # Try parsing
+        import re
+        array_match = re.search(r'\[[\s\S]*?\]', content)
+        if array_match:
+            print("\n✅ JSON Found!")
+            data = json.loads(array_match.group())
+            print(json.dumps(data, indent=2))
+        else:
+            print("\n❌ NO JSON ARRAY FOUND!")
+            print("   The model is chatting instead of outputting JSON.")
             
     except Exception as e:
-        print(f"\n❌ CONNECTION ERROR: {e}")
-        print("   Is the server running?")
+        print(f"\n❌ ERROR: {e}")
+        if "response" in locals():
+            print(f"Response text: {response.text}")
 
 if __name__ == "__main__":
-    test_vision()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--llamacpp", action="store_true")
+    parser.add_argument("--url", type=str)
+    parser.add_argument("--model", type=str, default="qwen2.5-vl:3b")
+    args = parser.parse_args()
+    
+    backend = "llamacpp" if args.llamacpp else "ollama"
+    url = args.url or ("http://localhost:8081" if args.llamacpp else "http://localhost:11434")
+    
+    test_vision(backend, url, args.model)
