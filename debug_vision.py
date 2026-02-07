@@ -11,29 +11,46 @@ def test_vision(backend="ollama", url="http://localhost:11434", model="qwen3-vl:
     print(f"   URL: {url}")
     print(f"   Model: {model}")
     
-    # 1. Create a simple test image (Red box on white background)
+    # 1. Create a simulated "Login Form" image with specific instructions
     img = Image.new('RGB', (800, 600), color='white')
     from PIL import ImageDraw
     d = ImageDraw.Draw(img)
-    d.rectangle([100, 100, 200, 200], fill='red')
-    d.text((110, 110), "Login", fill="white")
+    # Draw "Accepted usernames" box
+    d.rectangle([50, 50, 750, 150], outline='black')
+    d.text((60, 60), "Login Form", fill="black")
+    d.text((60, 80), "Accepted usernames: standard_user, locked_out_user", fill="red")
+    # Draw input fields
+    d.rectangle([200, 200, 600, 240], outline='gray')
+    d.text((210, 210), "Username", fill="gray")
+    d.rectangle([200, 260, 600, 300], outline='gray')
+    d.text((210, 270), "Password", fill="gray")
+    d.rectangle([200, 320, 300, 360], fill='blue')
+    d.text((220, 330), "Login", fill="white")
     
     buf = io.BytesIO()
     img.save(buf, format='JPEG')
     img_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
     
-    # 2. Construct Prompt (Planning Task)
-    prompt = """Task: Click on the red login button
+    # 2. Construct Prompt (Conflicting Task)
+    # Task says "Alice", Screen says "standard_user" -> This triggers reasoning loops
+    prompt = """Task: Login as Alice Williams (username: Alice_Williams)
 
 Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
 
 RULES:
 1. Each step = ONE click or ONE keyboard action
-2. Output JSON array:
-[{"action": "click", "target": "element description", "reason": "why"}]"""
+2. For typing: Include exact text in "value" field
+3. Use coordinates visible in the current screen
+4. For login: Use PROVIDED credentials exactly (unless screenshot overrides)
+
+Output JSON array (IMMEDIATELY - DO NOT THINK):
+[{"action": "click|type|scroll", "target": "specific element", "value": "text to type"}]"""
 
     payload = {}
     endpoint = ""
+    
+    # Use increased token limit (2500) to match the fix
+    max_tokens = 2500
     
     if backend == "ollama":
         endpoint = f"{url}/api/chat"
@@ -41,7 +58,7 @@ RULES:
             "model": model,
             "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
             "stream": False,
-            "options": {"temperature": 0.1}
+            "options": {"temperature": 0.1, "num_predict": max_tokens}
         }
     else:  # llama.cpp
         endpoint = f"{url}/v1/chat/completions"
@@ -54,18 +71,21 @@ RULES:
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                 ]
             }],
-            "max_tokens": 512,
+            "max_tokens": max_tokens,
             "temperature": 0.1
         }
     
-    print(f"\n📡 Connecting to {endpoint}...")
+    print(f"\n📡 Connecting to {endpoint} with max_tokens={max_tokens}...")
     try:
         if backend == "ollama":
-            response = requests.post(endpoint, json=payload, timeout=60)
+            response = requests.post(endpoint, json=payload, timeout=120)  # Longer timeout for thinking
             result = response.json()
             content = result.get("message", {}).get("content", "")
+            # Check for thinking trace in debug
+            if "thinking" in result.get("message", {}):
+                print(f"\n🧠 Thinking Trace Found: {len(str(result['message']['thinking']))} chars")
         else:
-            response = requests.post(endpoint, json=payload, timeout=60)
+            response = requests.post(endpoint, json=payload, timeout=120)
             result = response.json()
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         
