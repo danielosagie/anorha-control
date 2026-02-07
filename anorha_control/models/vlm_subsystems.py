@@ -73,7 +73,7 @@ class VLMBackend:
     def _check_available(self) -> bool:
         raise NotImplementedError
     
-    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256) -> str:
+    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False) -> str:
         raise NotImplementedError
     
     def _image_to_base64(self, img: Image.Image) -> str:
@@ -98,18 +98,31 @@ class OllamaBackend(VLMBackend):
         except:
             return False
     
-    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256) -> str:
+    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False) -> str:
         if not self.available:
             return ""
         
         img_base64 = self._image_to_base64(image)
         
+        # Adaptive limits for reasoning models
+        # If max_tokens is high (>1000), assume it might be a reasoning model needing more context
+        num_ctx = 8192 if max_tokens > 1000 else 4096
+        
+        options = {
+            "num_predict": max_tokens, 
+            "temperature": 0.1,
+            "num_ctx": num_ctx
+        }
+        
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt, "images": [img_base64]}],
             "stream": False,
-            "options": {"num_predict": max_tokens, "temperature": 0.1}
+            "options": options
         }
+        
+        if json_mode:
+            payload["format"] = "json"
         
         try:
             response = requests.post(
@@ -123,7 +136,12 @@ class OllamaBackend(VLMBackend):
                 return ""
                 
             result = response.json()
-            content = result.get("message", {}).get("content", "")
+            message = result.get("message", {})
+            content = message.get("content", "")
+            
+            # Log thinking trace if present (debug only)
+            if "thinking" in message and message["thinking"]:
+                print(f"[Ollama Debug] Reasoning trace: {len(message['thinking'])} chars")
             
             if not content:
                 print(f"[Ollama Debug] Empty content in response: {result}")
