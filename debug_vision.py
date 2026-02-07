@@ -49,24 +49,24 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
     payload = {}
     endpoint = ""
     
-    # Use extreme limits to accommodate "thinking" models
-    max_tokens = 6000
-    context_window = 16384 
+    # Use generous but safe limits for reasoning models
+    max_tokens = 4000
+    context_window = 8192 
     
     if backend == "ollama":
         endpoint = f"{url}/api/chat"
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
-            "stream": False,
+            "stream": True,  # STREAMING ON: See output immediately
             "format": "json",  # FORCE JSON OUTPUT
             "options": {
                 "temperature": 0.1, 
                 "num_predict": max_tokens,
-                "num_ctx": context_window  # CRITICAL: Increase context window
+                "num_ctx": context_window
             }
         }
-    else:  # llama.cpp
+    else:  # llama.cpp (streaming not implemented yet for this script)
         endpoint = f"{url}/v1/chat/completions"
         payload = {
             "model": model,
@@ -81,17 +81,53 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
             "temperature": 0.1
         }
     
-    print(f"\n📡 Connecting to {endpoint} with max_tokens={max_tokens}...")
+    print(f"\n📡 Connecting to {endpoint} with context={context_window}, predict={max_tokens}...")
     try:
+        content = ""
+        thinking_buffer = ""
+        is_thinking = False
+
         if backend == "ollama":
-            response = requests.post(endpoint, json=payload, timeout=120)  # Longer timeout for thinking
-            result = response.json()
-            content = result.get("message", {}).get("content", "")
-            # Check for thinking trace in debug
-            if "thinking" in result.get("message", {}):
-                print(f"\n🧠 Thinking Trace Found: {len(str(result['message']['thinking']))} chars")
+            with requests.post(endpoint, json=payload, stream=True, timeout=300) as response:
+                print("\n🌊 Streaming response:")
+                for line in response.iter_lines():
+                    if line:
+                        try:
+                            chunk = json.loads(line.decode('utf-8'))
+                            msg_chunk = chunk.get("message", {})
+                            delta = msg_chunk.get("content", "")
+                            
+                            # Handle thinking
+                            thinking_chunk = msg_chunk.get("thinking", "")
+                            if thinking_chunk:
+                                if not is_thinking:
+                                    print("\n🧠 Thinking...", end="", flush=True)
+                                    is_thinking = True
+                                thinking_buffer += thinking_chunk
+                                # Print dot every 100 chars of thinking
+                                if len(thinking_buffer) % 100 < len(thinking_chunk):
+                                    print(".", end="", flush=True)
+                            
+                            # Handle content
+                            if delta:
+                                if is_thinking:
+                                    print("\n💡 Done thinking!\n")
+                                    is_thinking = False
+                                print(delta, end="", flush=True)
+                                content += delta
+                                
+                            if chunk.get("done"):
+                                print("\n\n✅ Done.")
+                                if "eval_duration" in chunk:
+                                    dur = chunk['eval_duration'] / 1e9
+                                    cnt = chunk['eval_count']
+                                    print(f"   Speed: {cnt/dur:.1f} tok/s ({cnt} tokens in {dur:.1f}s)")
+
+                        except:
+                            pass
         else:
-            response = requests.post(endpoint, json=payload, timeout=120)
+            # Non-streaming fallback for llama.cpp
+            response = requests.post(endpoint, json=payload, timeout=300)
             result = response.json()
             content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
         
