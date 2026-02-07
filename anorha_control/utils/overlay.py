@@ -304,8 +304,8 @@ class PauseSwitch:
 class ControlIndicator:
     """Combined overlay + cursor + kill switch + pause switch."""
     
-    def __init__(self, on_kill: Callable = None, on_pause: Callable = None):
-        self.border = ScreenBorder()
+    def __init__(self, on_kill: Callable = None, on_pause: Callable = None, width: int = None, height: int = None):
+        self.border = ScreenBorder(w=width, h=height)
         self.cursor = CursorIndicator()
         self.on_kill = on_kill or (lambda: None)
         self.on_pause = on_pause or (lambda paused: None)
