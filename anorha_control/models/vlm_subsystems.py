@@ -58,7 +58,7 @@ class VerificationResult:
 class VLMBackend:
     """Base class for VLM backends (Ollama, llama.cpp, etc.)"""
     
-    def __init__(self, model: str, base_url: str, timeout: float = 30.0):
+    def __init__(self, model: str, base_url: str, timeout: float = 120.0):
         self.model = model
         self.base_url = base_url
         self.timeout = timeout
