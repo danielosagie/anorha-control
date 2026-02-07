@@ -117,8 +117,18 @@ class OllamaBackend(VLMBackend):
                 json=payload,
                 timeout=self.timeout
             )
+            
+            if response.status_code != 200:
+                print(f"[Ollama] HTTP {response.status_code}: {response.text}")
+                return ""
+                
             result = response.json()
-            return result.get("message", {}).get("content", "")
+            content = result.get("message", {}).get("content", "")
+            
+            if not content:
+                print(f"[Ollama Debug] Empty content in response: {result}")
+            
+            return content
         except Exception as e:
             print(f"[Ollama] Error: {e}")
             return ""
