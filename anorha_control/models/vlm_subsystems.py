@@ -234,6 +234,7 @@ class ElementGrounder:
             backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=30.0)
         self.backend = backend
     
+    
     def locate(self, target: str, screenshot: Image.Image) -> GroundingResult:
         """
         Locate an element on screen.
@@ -255,104 +256,12 @@ If not found:
 
 Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.height} pixels."""
         
-        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
+        # Use JSON mode for structural enforcement
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
         return self._parse_response(response)
-    
-    def _parse_response(self, response: str) -> GroundingResult:
-        """Parse VLM response into GroundingResult."""
-        try:
-            # Extract JSON from response
-            import re
-            json_match = re.search(r'\{[^}]+\}', response)
-            if json_match:
-                data = json.loads(json_match.group())
-                if data.get("found"):
-                    return GroundingResult(
-                        found=True,
-                        x=int(data.get("x", 0)),
-                        y=int(data.get("y", 0)),
-                        confidence=0.8,
-                        element_type=data.get("type", "unknown")
-                    )
-        except:
-            pass
-        return GroundingResult(found=False)
 
 
-class TextReader:
-    """
-    Fast text extraction: "What text is on screen?" → list of (text, bbox)
-    
-    Uses EasyOCR for speed, falls back to VLM.
-    Target latency: 100-300ms
-    """
-    
-    def __init__(self, use_gpu: bool = False):
-        self.reader = None
-        if EASYOCR_AVAILABLE:
-            try:
-                self.reader = easyocr.Reader(['en'], gpu=use_gpu)
-                print("[TextReader] Using EasyOCR")
-            except Exception as e:
-                print(f"[TextReader] EasyOCR init failed: {e}")
-    
-    def extract(self, screenshot: Image.Image) -> List[OCRResult]:
-        """
-        Extract all visible text from screenshot.
-        
-        Returns:
-            List of OCRResult with text and bounding boxes
-        """
-        if self.reader is None:
-            return []
-        
-        import numpy as np
-        img_array = np.array(screenshot)
-        
-        try:
-            results = self.reader.readtext(img_array)
-            return [
-                OCRResult(
-                    text=text,
-                    bbox=(int(bbox[0][0]), int(bbox[0][1]), int(bbox[2][0]), int(bbox[2][1])),
-                    confidence=conf
-                )
-                for bbox, text, conf in results
-                if conf > 0.3
-            ]
-        except Exception as e:
-            print(f"[TextReader] OCR error: {e}")
-            return []
-    
-    def find_text(self, target: str, screenshot: Image.Image) -> Optional[Tuple[int, int]]:
-        """
-        Find specific text and return its center coordinates.
-        """
-        results = self.extract(screenshot)
-        target_lower = target.lower()
-        
-        for result in results:
-            if target_lower in result.text.lower():
-                if result.bbox:
-                    x = (result.bbox[0] + result.bbox[2]) // 2
-                    y = (result.bbox[1] + result.bbox[3]) // 2
-                    return (x, y)
-        return None
 
-
-class StateVerifier:
-    """
-    State verification: "Did the action work?" → success/fail
-    
-    Compares before/after screenshots or analyzes current state.
-    Target latency: 200-500ms (only called after actions)
-    """
-    
-    def __init__(self, backend: VLMBackend = None):
-        if backend is None:
-            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=30.0)
-        self.backend = backend
-    
     def verify_action(
         self, 
         action: str, 
@@ -380,7 +289,7 @@ Look at the current screen state and determine:
 Respond with ONLY a JSON object:
 {{"success": true/false, "reason": "brief explanation"}}"""
         
-        response = self.backend.generate(prompt, after, max_tokens=2500)
+        response = self.backend.generate(prompt, after, max_tokens=2500, json_mode=True)
         return self._parse_response(response)
     
     def check_state(self, expected: str, screenshot: Image.Image) -> VerificationResult:
@@ -396,39 +305,11 @@ Respond with ONLY a JSON object:
 Respond with ONLY a JSON object:
 {{"success": true/false, "reason": "brief explanation"}}"""
         
-        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
         return self._parse_response(response)
-    
-    def _parse_response(self, response: str) -> VerificationResult:
-        try:
-            import re
-            json_match = re.search(r'\{[^}]+\}', response)
-            if json_match:
-                data = json.loads(json_match.group())
-                return VerificationResult(
-                    success=data.get("success", False),
-                    reason=data.get("reason", ""),
-                    changed=True
-                )
-        except:
-            pass
-        return VerificationResult(success=False, reason="Could not parse response")
 
 
-class ActionPlanner:
-    """
-    Action planning: Complex task → atomic steps
-    
-    This is the enhanced version of plan_task_with_vision.
-    Target latency: 300-800ms
-    """
-    
-    def __init__(self, backend: VLMBackend = None, sample_data: Dict[str, Any] = None):
-        if backend is None:
-            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=60.0)
-        self.backend = backend
-        self.sample_data = sample_data or {}
-    
+
     def plan(self, task: str, screenshot: Image.Image) -> List[Dict[str, Any]]:
         """
         Create atomic action steps for a task.
@@ -459,8 +340,8 @@ RULES:
 Output JSON array (IMMEDIATELY - DO NOT THINK):
 [{{"action": "click|type|scroll", "target": "specific element", "value": "text to type"}}]"""
         
-        # INCREASED TOKEN LIMIT: VLM needs space to "think" before outputting JSON
-        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
+        # INCREASED TOKEN LIMIT + JSON MODE: Handles reasoning models better
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
         return self._parse_steps(response)
     
     def _parse_steps(self, response: str) -> List[Dict[str, Any]]:
