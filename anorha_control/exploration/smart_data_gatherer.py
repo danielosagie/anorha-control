@@ -645,7 +645,7 @@ async def main():
     parser.add_argument("--target", type=int, default=5000, help="Target trajectories")
     parser.add_argument("--headless", action="store_true", default=True, help="Run headless")
     parser.add_argument("--visible", action="store_true", help="Show browser window")
-    parser.add_argument("--model", type=str, default="qwen3-vl:2b", help="VLM model")
+    parser.add_argument("--model", type=str, default="qwen2.5-vl:7b", help="VLM model")
     parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
     parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp URL")
     
