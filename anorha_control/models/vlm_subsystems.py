@@ -212,8 +212,8 @@ class ElementGrounder:
     
     def __init__(self, backend: VLMBackend = None):
         if backend is None:
-            # Default to Qwen3-VL-1B via Ollama
-            backend = OllamaBackend("qwen3-vl:2b", "http://localhost:11434", timeout=30.0)
+            # Default to Qwen2.5-VL-7B via Ollama (avoid qwen3-vl loops)
+            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=30.0)
         self.backend = backend
     
     def locate(self, target: str, screenshot: Image.Image) -> GroundingResult:
@@ -332,7 +332,7 @@ class StateVerifier:
     
     def __init__(self, backend: VLMBackend = None):
         if backend is None:
-            backend = OllamaBackend("qwen3-vl:2b", "http://localhost:11434", timeout=30.0)
+            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=30.0)
         self.backend = backend
     
     def verify_action(
@@ -407,7 +407,7 @@ class ActionPlanner:
     
     def __init__(self, backend: VLMBackend = None, sample_data: Dict[str, Any] = None):
         if backend is None:
-            backend = OllamaBackend("qwen3-vl:2b", "http://localhost:11434", timeout=60.0)
+            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=60.0)
         self.backend = backend
         self.sample_data = sample_data or {}
     
