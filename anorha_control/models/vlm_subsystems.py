@@ -429,19 +429,17 @@ class ActionPlanner:
                 data_context += f"- {key}: {value}\n"
         
         prompt = f"""Task: {task}{data_context}
-2026-02-07T07:11:34.6527426Z
 
-2026-02-07T07:11:34.6527426Z
 Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
 
 RULES:
 1. Each step = ONE click or ONE keyboard action
 2. For typing: Include exact text in "value" field
 3. Use coordinates visible in the current screen
-4. For login: Use PROVIDED credentials exactly
+4. For login: Use PROVIDED credentials exactly (unless screenshot overrides)
 
-Output JSON array:
-[{{"action": "click|type|scroll", "target": "specific element", "value": "text to type", "reason": "why"}}]"""
+Output JSON array (IMMEDIATELY - DO NOT THINK):
+[{{"action": "click|type|scroll", "target": "specific element", "value": "text to type"}}]"""
         
         # INCREASED TOKEN LIMIT: VLM needs space to "think" before outputting JSON
         response = self.backend.generate(prompt, screenshot, max_tokens=2500)
