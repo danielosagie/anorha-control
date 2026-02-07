@@ -99,16 +99,18 @@ class TRM(nn.Module):
         num_action_types: int = 5,  # click, right_click, double_click, type, scroll
         dropout: float = 0.1,
         num_instructions: int = 100,  # Learnable instruction embeddings for now
+        text_encoder=None,  # Optional SimpleTextEncoder for semantic instruction conditioning
     ):
         super().__init__()
         
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.text_encoder = text_encoder
         
         # Vision projection (if dims don't match)
         self.vision_proj = nn.Linear(vision_dim, hidden_dim) if vision_dim != hidden_dim else nn.Identity()
         
-        # Learnable instruction embeddings (will be replaced with text encoder later)
+        # Learnable instruction embeddings (fallback when no text encoder)
         self.instruction_embeddings = nn.Embedding(num_instructions, hidden_dim)
         
         # Learnable coordinate query (refined through layers)
@@ -214,20 +216,32 @@ class TRM(nn.Module):
         self,
         vision_embedding: torch.Tensor,
         instruction_id: torch.Tensor = None,
+        instruction_text: str = None,
+        instruction_embedding: torch.Tensor = None,
         screen_size: tuple = (1920, 1080),
     ) -> dict:
         """
         Make a prediction for actual use.
         
+        Args:
+            vision_embedding: Vision embedding from encoder
+            instruction_id: Optional learnable instruction ID
+            instruction_text: Optional text (e.g. "login button") - uses text_encoder if set
+            instruction_embedding: Optional pre-computed instruction embedding
+        
         Returns:
-            dict with:
-                - x, y: Pixel coordinates
-                - action: Action type string
-                - confidence: Confidence score
+            dict with x, y, action, confidence
         """
+        instr_emb = instruction_embedding
+        if instr_emb is None and instruction_text and self.text_encoder is not None:
+            instr_emb = self.text_encoder(instruction_text)
+            if vision_embedding.dim() == 2 and instr_emb.dim() == 2:
+                instr_emb = instr_emb.to(vision_embedding.device)
+                if instr_emb.size(0) == 1 and vision_embedding.size(0) > 1:
+                    instr_emb = instr_emb.expand(vision_embedding.size(0), -1)
         self.eval()
         with torch.no_grad():
-            output = self(vision_embedding, instruction_id)
+            output = self(vision_embedding, instruction_id, instr_emb)
         
         # Convert normalized coords to pixels
         coords = output["coords"][0].cpu()
@@ -252,14 +266,19 @@ class TRM(nn.Module):
 def load_trm(
     checkpoint_path: str = None,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    use_text_encoder: bool = False,
     **kwargs,
 ) -> TRM:
-    """Load TRM model, optionally from checkpoint."""
+    """Load TRM model, optionally from checkpoint. Set use_text_encoder=True for semantic instruction conditioning."""
+    if use_text_encoder:
+        from .text_encoder import SimpleTextEncoder
+        text_encoder = SimpleTextEncoder(embed_dim=kwargs.get("hidden_dim", 256))
+        kwargs["text_encoder"] = text_encoder
     model = TRM(**kwargs)
     
     if checkpoint_path:
         state = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(state["model_state_dict"])
+        model.load_state_dict(state["model_state_dict"], strict=False)
     
     model = model.to(device)
     return model

@@ -3,7 +3,7 @@ Task Curriculum - Structured training tasks for TRM precision training.
 Includes aim trainers, typing tests, form completion, and long-horizon objectives.
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Tuple
 from enum import Enum
 import random
 
@@ -17,6 +17,7 @@ class TaskCategory(Enum):
     ECOMMERCE = "ecommerce"      # Shopping flows, checkout
     LONGHORIZON = "longhorizon"  # Multi-step complex tasks
     REALWORLD = "realworld"      # Real sites like Google, Airbnb, etc.
+    DESKTOP = "desktop"          # File explorer, downloads, desktop tasks
 
 
 class Difficulty(Enum):
@@ -38,6 +39,7 @@ class Task:
     success_hints: List[str]  # Visual hints for success (for GLM/VLM to verify)
     max_steps: int = 20
     sample_data: Dict[str, Any] = field(default_factory=dict)
+    viewport: Optional[Tuple[int, int]] = None  # (width, height) for robustness - None = use default
     
     def __str__(self):
         return f"[{self.category.value}] {self.name} ({self.difficulty.name})"
@@ -290,6 +292,26 @@ NAVIGATION_TASKS = [
         max_steps=10,
         sample_data={"query": "torvalds"},
     ),
+    # Robustness: hyperlinks-only (no search box)
+    Task(
+        name="Wikipedia - Hyperlinks Only",
+        category=TaskCategory.NAVIGATION,
+        difficulty=Difficulty.HARD,
+        site="https://en.wikipedia.org/wiki/Main_Page",
+        objective="Navigate to the 'Machine Learning' article using ONLY hyperlinks (no search box)",
+        success_hints=["Machine Learning", "Article found", "ML page"],
+        max_steps=20,
+    ),
+    # Robustness: browser back/forward
+    Task(
+        name="The Internet - Back Forward",
+        category=TaskCategory.NAVIGATION,
+        difficulty=Difficulty.MEDIUM,
+        site="http://the-internet.herokuapp.com/",
+        objective="Navigate to a subpage, then use the browser back button to return",
+        success_hints=["Returned", "Main page", "Back worked"],
+        max_steps=10,
+    ),
 ]
 
 
@@ -362,6 +384,7 @@ LONGHORIZON_TASKS = [
         objective="Find the population of Tokyo from the Wikipedia article",
         success_hints=["13 million", "14 million", "population", "Tokyo"],
         max_steps=20,
+        sample_data={"query": "Tokyo", "search": "Tokyo"},  # Actual search term, not "Search"
     ),
     Task(
         name="Multi-Form Registration",
@@ -459,6 +482,59 @@ REALWORLD_TASKS = [
 
 
 # =============================================================================
+# DESKTOP TASKS - File explorer, downloads, search (use DesktopBackend)
+# =============================================================================
+
+DESKTOP_TASKS = [
+    Task(
+        name="File Explorer - Open Downloads",
+        category=TaskCategory.DESKTOP,
+        difficulty=Difficulty.EASY,
+        site="desktop",
+        objective="Open File Explorer and go to Downloads folder",
+        success_hints=["Downloads", "File Explorer", "folder opened"],
+        max_steps=10,
+    ),
+    Task(
+        name="File Explorer - Find File",
+        category=TaskCategory.DESKTOP,
+        difficulty=Difficulty.MEDIUM,
+        site="desktop",
+        objective="Open File Explorer, go to Downloads, and find a file",
+        success_hints=["File listed", "Downloads", "file visible"],
+        max_steps=15,
+    ),
+    Task(
+        name="File Explorer - Search Picture",
+        category=TaskCategory.DESKTOP,
+        difficulty=Difficulty.MEDIUM,
+        site="desktop",
+        objective="Open File Explorer and search for a picture file",
+        success_hints=["Search", "picture", "image", "results"],
+        max_steps=15,
+    ),
+    Task(
+        name="Desktop - Open Downloads",
+        category=TaskCategory.DESKTOP,
+        difficulty=Difficulty.EASY,
+        site="downloads",
+        objective="Open the Downloads folder",
+        success_hints=["Downloads", "folder", "files"],
+        max_steps=8,
+    ),
+    Task(
+        name="File Explorer - Navigate",
+        category=TaskCategory.DESKTOP,
+        difficulty=Difficulty.EASY,
+        site="desktop",
+        objective="Open File Explorer and navigate to your home folder",
+        success_hints=["Documents", "Downloads", "home", "folder"],
+        max_steps=10,
+    ),
+]
+
+
+# =============================================================================
 # CURRICULUM CLASS
 # =============================================================================
 
@@ -487,6 +563,7 @@ class TaskCurriculum:
         TaskCategory.ECOMMERCE: ECOMMERCE_TASKS,
         TaskCategory.LONGHORIZON: LONGHORIZON_TASKS,
         TaskCategory.REALWORLD: REALWORLD_TASKS,
+        TaskCategory.DESKTOP: DESKTOP_TASKS,
     }
     
     # Category weights for balanced training
@@ -498,6 +575,7 @@ class TaskCurriculum:
         TaskCategory.ECOMMERCE: 0.05,
         TaskCategory.LONGHORIZON: 0.05,
         TaskCategory.REALWORLD: 0.15,   # High weight for real-world application
+        TaskCategory.DESKTOP: 0.05,     # Desktop/file explorer tasks
     }
     
     def __init__(self, max_difficulty: Difficulty = Difficulty.MEDIUM):
@@ -521,16 +599,33 @@ class TaskCurriculum:
             "current_recommendation": "Start with precision tasks (aim trainers) for 5 hours, then mix in forms and navigation"
         }
     
-    def sample_task(self, category: TaskCategory = None) -> Task:
-        """Sample a task, optionally from a specific category."""
+    def sample_task(self, category: TaskCategory = None, backend: str = "browser") -> Task:
+        """Sample a task, optionally from a specific category.
+        backend: "browser" (sample only browser tasks) or "desktop" (sample only desktop tasks).
+        """
         if category:
             tasks = self.ALL_TASKS[category]
         else:
-            # Weighted category selection
+            # Weighted category selection (filter by backend)
             categories = list(self.CATEGORY_WEIGHTS.keys())
             weights = list(self.CATEGORY_WEIGHTS.values())
-            category = random.choices(categories, weights=weights)[0]
-            tasks = self.ALL_TASKS[category]
+            if backend == "desktop":
+                # Only desktop tasks
+                tasks = self.ALL_TASKS[TaskCategory.DESKTOP]
+            elif backend == "browser":
+                # Exclude desktop tasks, renormalize weights
+                cat_weights = [(c, w) for c, w in zip(categories, weights) if c != TaskCategory.DESKTOP]
+                if not cat_weights:
+                    tasks = []
+                else:
+                    cats, wgts = zip(*cat_weights)
+                    total = sum(wgts)
+                    wgts = [w / total for w in wgts]
+                    category = random.choices(cats, weights=wgts)[0]
+                    tasks = self.ALL_TASKS[category]
+            else:
+                category = random.choices(categories, weights=weights)[0]
+                tasks = self.ALL_TASKS[category]
         
         # Filter by difficulty
         valid_tasks = [t for t in tasks if t.difficulty.value <= self.max_difficulty.value]

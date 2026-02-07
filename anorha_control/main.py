@@ -321,6 +321,11 @@ def main():
     gather_parser.add_argument("--start-server", action="store_true", help="Start llama.cpp server with GPU if not running (--llamacpp only)")
     gather_parser.add_argument("--fast-vlm", action="store_true", help="Resize images for VLM (768x480) - speeds up when vision encoder is on CPU")
     
+    # SDK server command (LLM tool use)
+    sdk_parser = subparsers.add_parser("sdk", help="Run Anorha SDK server for LLM tool use")
+    sdk_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind")
+    sdk_parser.add_argument("--port", type=int, default=8765, help="Port to bind")
+    
     # Server command (model server management)
     server_parser = subparsers.add_parser("server", help="Manage model servers (llama.cpp/Ollama)")
     # Note: server command delegates to model_server.py which has its own subparsers
@@ -337,6 +342,9 @@ def main():
         asyncio.run(run_stats(args))
     elif args.command == "gather":
         asyncio.run(run_gather(args))
+    elif args.command == "sdk":
+        from anorha_control.sdk.server import run_server
+        run_server(host=args.host, port=args.port)
     elif args.command == "server":
         # Delegate to model_server module
         from anorha_control import model_server

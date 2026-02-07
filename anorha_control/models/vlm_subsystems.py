@@ -286,6 +286,10 @@ class ElementGrounder:
         """
         Locate an element on screen.
         
+        Returns pixel coordinates in screenshot space. For the canonical TRM-VLM format
+        (scale across screen sizes), callers should convert to normalized 0-1:
+        x_norm = x / viewport_width, y_norm = y / viewport_height.
+        
         Args:
             target: Description of element to find (e.g., "login button")
             screenshot: Current screen image
@@ -295,30 +299,38 @@ class ElementGrounder:
         """
         prompt = f"""Look at this screenshot and find the exact location of: "{target}"
 
-If found, respond with ONLY a JSON object:
+Image size: {screenshot.width}x{screenshot.height} pixels. x=0,y=0 is top-left.
+
+If you find the element, respond with ONLY a JSON object with x and y as pixel coordinates (center of the element):
 {{"found": true, "x": <pixel_x>, "y": <pixel_y>, "type": "<element_type>"}}
+
+You MUST provide x and y when found is true. If you cannot determine the exact pixel location, use found: false.
 
 If not found:
 {{"found": false}}
 
-Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.height} pixels. /nothink"""
+/nothink"""
         
         # Use JSON mode for structural enforcement
         response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
         return self._parse_grounding_response(response)
     
     def _parse_grounding_response(self, response: str) -> GroundingResult:
-        """Parse VLM response into GroundingResult."""
+        """Parse VLM response into GroundingResult. (0,0) is invalid - treat as not found."""
         try:
             import re
             json_match = re.search(r'\{[^}]+\}', response)
             if json_match:
                 data = json.loads(json_match.group())
                 if data.get("found"):
+                    x, y = int(data.get("x", 0)), int(data.get("y", 0))
+                    # (0,0) = no valid coords from VLM - treat as failure, not success
+                    if x == 0 and y == 0:
+                        return GroundingResult(found=False)
                     return GroundingResult(
                         found=True,
-                        x=int(data.get("x", 0)),
-                        y=int(data.get("y", 0)),
+                        x=x,
+                        y=y,
                         confidence=0.8,
                         element_type=data.get("type", "unknown")
                     )
@@ -405,7 +417,8 @@ class StateVerifier:
         self, 
         action: str, 
         before: Image.Image, 
-        after: Image.Image
+        after: Image.Image,
+        task: str = "",
     ) -> VerificationResult:
         """
         Verify if an action succeeded by comparing before/after screenshots.
@@ -414,17 +427,16 @@ class StateVerifier:
             action: Description of action taken (e.g., "clicked login button")
             before: Screenshot before action
             after: Screenshot after action
+            task: Optional task objective - did the action help achieve this task?
             
         Returns:
             VerificationResult with success status
         """
-        prompt = f"""I just performed this action: "{action}"
+        task_line = f'\nThe task was: "{task}". ' if task else " "
+        prompt = f"""I just performed this action: "{action}"{task_line}
+Did this action succeed AND help achieve the task? E.g. typing "Username" on a Wikipedia page is wrong.
 
-Look at the current screen state and determine:
-1. Did the action succeed?
-2. What changed?
-
-Respond with ONLY a JSON object:
+Look at before/after screenshots. Respond with ONLY a JSON object:
 {{"success": true/false, "reason": "brief explanation"}} /nothink"""
         
         response = self.backend.generate(prompt, after, max_tokens=2500, json_mode=True)
@@ -475,13 +487,19 @@ class ActionPlanner:
         self.backend = backend
         self.sample_data = sample_data or {}
     
-    def plan(self, task: str, screenshot: Image.Image) -> List[Dict[str, Any]]:
+    def plan(
+        self,
+        task: str,
+        screenshot: Image.Image,
+        state_context: str = "",
+    ) -> List[Dict[str, Any]]:
         """
         Create atomic action steps for a task.
         
         Args:
             task: High-level task description
             screenshot: Current screen state
+            state_context: When re-planning: "Done: X. Visible: Y. Next: Z"
             
         Returns:
             List of action dicts: [{action, target, value, reason}]
@@ -490,19 +508,94 @@ class ActionPlanner:
         if self.sample_data:
             data_line = " Data: " + ", ".join(f"{k}={v}" for k, v in self.sample_data.items())
         
-        system = "Output ONLY a JSON array. No reasoning. No thinking. Start with ["
-        prompt = f"""Task: {task}{data_line}
-
-Steps = ONE click or ONE type per step. Output JSON only:
-[{{"action":"click","target":"element name","value":""}}] or {{"action":"click","target":"element"}}"""
+        context_block = ""
+        if state_context:
+            context_block = f"\nCurrent state: {state_context}\n"
         
-        # 512 tokens: less room for thinking loops, forces faster output
+        system = "Output ONLY a JSON array. No reasoning. No thinking. Start with ["
+        # Task-context examples: match task type for better breakdown.
+        # NEVER use target 'Submit' unless the task explicitly involves form submission.
+        task_lower = task.lower()
+        if "solve" in task_lower or "calculator" in task_lower:
+            examples = '[{"action":"type","target":"First number","value":"42"},{"action":"click","target":"Add","value":""},{"action":"type","target":"Second number","value":"13"},{"action":"click","target":"Calculate","value":""}]'
+        elif "reaction" in task_lower or ("click" in task_lower and "green" in task_lower):
+            examples = '[{"action":"click","target":"Click to start","value":""}]'
+        elif "aim" in task_lower or ("target" in task_lower and "click" in task_lower):
+            examples = '[{"action":"click","target":"Start","value":""},{"action":"click","target":"target","value":""}]'
+        elif "moves and changes" in task_lower or "dynamic" in task_lower:
+            examples = '[{"action":"click","target":"0","value":""}]'
+        elif "hint" in task_lower or "locator" in task_lower or ("find" in task_lower and "element" in task_lower):
+            examples = '[{"action":"click","target":"element matching hint","value":""}]'
+        elif "top products" in task_lower or "#1 product" in task_lower or "browse" in task_lower and "click" in task_lower:
+            examples = '[{"action":"click","target":"first product","value":""}]'
+        elif "back button" in task_lower or "browser back" in task_lower or "back to return" in task_lower:
+            examples = '[{"action":"click","target":"link or subpage","value":""},{"action":"click","target":"Back","value":""}]'
+        elif "login" in task_lower or "username" in task_lower or "password" in task_lower:
+            examples = '[{"action":"type","target":"Username","value":"admin"},{"action":"type","target":"Password","value":"pass"},{"action":"click","target":"Login","value":""}]'
+        elif "search" in task_lower and ("view" in task_lower or "click" in task_lower or "profile" in task_lower):
+            examples = '[{"action":"type","target":"Search","value":"query"},{"action":"press_enter","target":"Search","value":""},{"action":"click","target":"first result","value":""}]'
+        elif "find" in task_lower and ("population" in task_lower or "article" in task_lower or "wikipedia" in task_lower):
+            examples = '[{"action":"type","target":"Search Wikipedia","value":"Tokyo"},{"action":"press_enter","target":"Search","value":""},{"action":"click","target":"Tokyo","value":""}]'
+        elif "search" in task_lower or "find" in task_lower:
+            examples = '[{"action":"type","target":"Search","value":"query"},{"action":"press_enter","target":"Search","value":""}]'
+        elif "click" in task_lower and ("link" in task_lower or "article" in task_lower or "navigate" in task_lower):
+            examples = '[{"action":"click","target":"Machine Learning","value":""}]'
+        elif "add" in task_lower and ("cart" in task_lower or "coffee" in task_lower):
+            examples = '[{"action":"click","target":"Cappuccino","value":""},{"action":"click","target":"Add to cart","value":""}]'
+        elif "file explorer" in task_lower or "downloads" in task_lower or "desktop" in task_lower:
+            examples = '[{"action":"click","target":"Address bar","value":""},{"action":"type","target":"Address bar","value":"Downloads"},{"action":"press_enter","target":"Address bar","value":""}]'
+        elif "navigate" in task_lower and ("folder" in task_lower or "home" in task_lower):
+            examples = '[{"action":"click","target":"Downloads","value":""},{"action":"click","target":"Documents","value":""}]'
+        else:
+            examples = '[{"action":"click","target":"visible button or link","value":""}]'
+        prompt = f"""Task: {task}{data_line}{context_block}
+
+Output 2-5 steps as JSON array. Each step: action, target, value.
+target = EXACT visible text on the element (button label, link text, folder name). Use ONLY what you literally see on screen—no guesses.
+value = for type/search: the ACTUAL text to type (e.g. "Tokyo" for "Find population of Tokyo", NOT the word "Search").
+For search: target=search box, value=search query (what to search for).
+If the button says "Click to start", target is "Click to start" not "Submit".
+For reaction/aim tests: CLICK only (never type). Target is the start button or the click area.
+For File Explorer: click folder names (Downloads, Documents, This PC), or the address bar, or the search box.
+
+NEVER use target "Submit" unless the task explicitly involves form submission (login, sign up, contact form). For "click the button that moves", "find element from hints", "browse top products", "back button" — use the SPECIFIC element visible on screen.
+
+Examples for this task type: {examples}
+
+Output JSON array only:"""
+        
+        # 1024 tokens for multi-step output
         response = self.backend.generate(
-            prompt, screenshot, max_tokens=512, json_mode=True,
+            prompt, screenshot, max_tokens=1024, json_mode=True,
             system=system if isinstance(self.backend, OllamaBackend) else None
         )
         return self._parse_steps(response)
     
+    def _extract_step_from_malformed(self, text: str) -> Optional[Dict[str, Any]]:
+        """Extract action/target/value when JSON is truncated (e.g. VLM ran out of tokens)."""
+        import re
+        # Strip markdown code blocks (```json ... or ``` ...)
+        text = re.sub(r"^```(?:json)?\s*", "", text.strip())
+        text = re.sub(r"\s*```\s*$", "", text)
+        # Try quoted keys first, then unquoted (some VLMs output action: "click")
+        for pattern_action, pattern_target, pattern_value in [
+            (r'"action"\s*:\s*"([^"]*)"', r'"target"\s*:\s*"([^"]*)"', r'"value"\s*:\s*"([^"]*)"'),
+            (r'"action"\s*:\s*"([^"]*)"', r'"target"\s*:\s*"([^"]*)"', None),
+            (r'\baction\s*:\s*"([^"]*)"', r'\btarget\s*:\s*"([^"]*)"', None),
+        ]:
+            action_m = re.search(pattern_action, text)
+            target_m = re.search(pattern_target, text)
+            value_m = re.search(pattern_value, text) if pattern_value else None
+            if action_m and target_m:
+                step = {
+                    "action": (action_m.group(1) or "").strip() or "click",
+                    "target": (target_m.group(1) or "").strip(),
+                    "value": (value_m.group(1) if value_m else "").strip() if value_m else "",
+                }
+                if self._valid_step(step):
+                    return step
+        return None
+
     def _valid_step(self, s: Any) -> bool:
         """Filter out null/invalid steps from garbage JSON."""
         if s is None:
@@ -567,6 +660,10 @@ Steps = ONE click or ONE type per step. Output JSON only:
                     return [obj]
             except json.JSONDecodeError:
                 pass
+            # Truncated JSON fallback: extract action/target/value via regex
+            step = self._extract_step_from_malformed(response[brace:])
+            if step:
+                return [step]
         print(f"[VLM Debug] No JSON array or object found in response:\n{response[:300]}")
         return []
 
@@ -621,6 +718,26 @@ class VLMSubsystems:
         """Locate an element on screen."""
         return self.grounder.locate(target, screenshot)
     
+    def locate_with_task_context(
+        self, target: str, screenshot: Image.Image, task: str
+    ) -> GroundingResult:
+        """Locate element with task context for disambiguation (e.g. 'Login' vs 'Sign up')."""
+        prompt = f"""Task: {task}
+
+Find the element: "{target}"
+
+Image: {screenshot.width}x{screenshot.height} pixels. x=0,y=0 top-left.
+
+Respond with ONLY a JSON object:
+{{"found": true, "x": <center_x>, "y": <center_y>, "type": "<element_type>"}} if found.
+{{"found": false}} if not found.
+
+/nothink"""
+        response = self.grounder.backend.generate(
+            prompt, screenshot, max_tokens=2500, json_mode=True
+        )
+        return self.grounder._parse_grounding_response(response)
+    
     def read_text(self, screenshot: Image.Image) -> List[OCRResult]:
         """Extract all text from screenshot."""
         return self.text_reader.extract(screenshot)
@@ -629,19 +746,25 @@ class VLMSubsystems:
         """Find text and return its center coordinates."""
         return self.text_reader.find_text(target, screenshot)
     
-    def verify(self, action: str, before: Image.Image, after: Image.Image) -> VerificationResult:
-        """Verify if action succeeded."""
-        return self.verifier.verify_action(action, before, after)
+    def verify(self, action: str, before: Image.Image, after: Image.Image, task: str = "") -> VerificationResult:
+        """Verify if action succeeded. Pass task for intent-aware verification."""
+        return self.verifier.verify_action(action, before, after, task=task)
     
     def check_state(self, expected: str, screenshot: Image.Image) -> VerificationResult:
         """Check if screen matches expected state."""
         return self.verifier.check_state(expected, screenshot)
     
-    def plan(self, task: str, screenshot: Image.Image, sample_data: Dict = None) -> List[Dict]:
-        """Plan atomic steps for task."""
+    def plan(
+        self,
+        task: str,
+        screenshot: Image.Image,
+        sample_data: Dict = None,
+        state_context: str = "",
+    ) -> List[Dict]:
+        """Plan atomic steps for task. state_context: for re-planning (done + visible + next)."""
         if sample_data:
             self.planner.sample_data = sample_data
-        return self.planner.plan(task, screenshot)
+        return self.planner.plan(task, screenshot, state_context=state_context)
 
 
 # =============================================================================

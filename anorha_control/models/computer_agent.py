@@ -19,6 +19,7 @@ The agent handles:
 - Verification and retry
 """
 import asyncio
+import io
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 from PIL import Image
@@ -42,11 +43,16 @@ class AgentConfig:
     orchestrator_model: str = "qwen3:4b"
     
     # TRM settings
-    trm_checkpoint: str = None  # Path to trained TRM
+    trm_checkpoint: str = None  # Path to trained vision TRM
+    trm_use_text_encoder: bool = False  # Use text encoder for semantic instruction conditioning
+    trajectory_trm_checkpoint: str = None  # Path to TrajectoryTRM for smooth movement
+    use_trajectory_smoothing: bool = False  # Use TrajectoryTRM for smooth path to target
+    use_trajectory_smoothing: bool = False  # Use TrajectoryTRM for smooth path to target
     trm_fallback_to_vlm: bool = True  # Use VLM if TRM not confident
     trm_confidence_threshold: float = 0.7
     
     # Execution settings
+    trajectory_max_steps: int = 15  # Max TrajectoryTRM steps for smooth path
     max_retries: int = 3
     action_delay_ms: int = 100
     verify_actions: bool = True
@@ -115,11 +121,13 @@ class ComputerAgent:
         # Initialize components
         self._init_vlm()
         self._init_trm()
+        self._init_trajectory_trm()
         self._init_orchestrator()
         
         print(f"[ComputerAgent] Initialized")
         print(f"  VLM: {self.config.vlm_model} via {self.config.vlm_backend}")
         print(f"  TRM: {'loaded' if self.trm else 'not loaded'}")
+        print(f"  TrajectoryTRM: {'loaded' if self.trajectory_trm else 'not loaded'}")
         print(f"  Orchestrator: {self.config.orchestrator_model}")
     
     def _init_vlm(self):
@@ -135,10 +143,60 @@ class ComputerAgent:
         self.trm = None
         if self.config.trm_checkpoint:
             try:
-                self.trm = load_trm(self.config.trm_checkpoint)
+                self.trm = load_trm(
+                    self.config.trm_checkpoint,
+                    use_text_encoder=self.config.trm_use_text_encoder,
+                )
                 print(f"[ComputerAgent] TRM loaded from {self.config.trm_checkpoint}")
             except Exception as e:
                 print(f"[ComputerAgent] TRM load failed: {e}")
+    
+    def _init_trajectory_trm(self):
+        """Initialize TrajectoryTRM for smooth mouse movement."""
+        self.trajectory_trm = None
+        if self.config.trajectory_trm_checkpoint and self.config.use_trajectory_smoothing:
+            try:
+                from ..training.trm_training import load_trajectory_trm
+                self.trajectory_trm = load_trajectory_trm(self.config.trajectory_trm_checkpoint)
+                print(f"[ComputerAgent] TrajectoryTRM loaded from {self.config.trajectory_trm_checkpoint}")
+            except Exception as e:
+                print(f"[ComputerAgent] TrajectoryTRM load failed: {e}")
+    
+    def _generate_trajectory(self, target_x: int, target_y: int) -> Optional[List[tuple]]:
+        """Generate smooth path from viewport center to target using TrajectoryTRM."""
+        if not self.trajectory_trm:
+            return None
+        import torch
+        w, h = self.config.viewport_width, self.config.viewport_height
+        cur_x_norm = 0.5
+        cur_y_norm = 0.5
+        tar_x_norm = target_x / w
+        tar_y_norm = target_y / h
+        path = []
+        vx, vy = 0.0, 0.0
+        dt_norm = 0.05
+        for _ in range(self.config.trajectory_max_steps):
+            dev = next(self.trajectory_trm.parameters()).device if list(self.trajectory_trm.parameters()) else "cpu"
+            inp = torch.tensor(
+                [[cur_x_norm, cur_y_norm, tar_x_norm, tar_y_norm, vx, vy]],
+                dtype=torch.float32,
+                device=dev,
+            )
+            with torch.no_grad():
+                coords, click_prob = self.trajectory_trm(inp)
+            next_x_norm = coords[0, 0].item()
+            next_y_norm = coords[0, 1].item()
+            click_p = click_prob[0, 0].item()
+            px = int(next_x_norm * w)
+            py = int(next_y_norm * h)
+            path.append((px, py))
+            dist = ((next_x_norm - tar_x_norm) ** 2 + (next_y_norm - tar_y_norm) ** 2) ** 0.5
+            if click_p > 0.5 or dist < 0.02:
+                break
+            vx = (next_x_norm - cur_x_norm) / dt_norm
+            vy = (next_y_norm - cur_y_norm) / dt_norm
+            cur_x_norm, cur_y_norm = next_x_norm, next_y_norm
+        return path if path else None
     
     def _init_orchestrator(self):
         """Initialize orchestrator LLM."""
@@ -254,9 +312,10 @@ class ComputerAgent:
                 encoder = VisionEncoder()
                 embedding = encoder.encode_image(screenshot)
                 
-                # TRM prediction
+                # TRM prediction (pass target for instruction conditioning if text encoder set)
                 pred = self.trm.predict(
                     embedding,
+                    instruction_text=target if getattr(self.trm, "text_encoder", None) else None,
                     screen_size=(self.config.viewport_width, self.config.viewport_height)
                 )
                 
@@ -266,8 +325,16 @@ class ComputerAgent:
             except Exception as e:
                 print(f"[ComputerAgent] TRM error: {e}")
         
-        # Step 3: Execute click
+        # Step 3: Execute click (with optional trajectory smoothing)
         if self.page:
+            if self.trajectory_trm:
+                path = self._generate_trajectory(x, y)
+                if path:
+                    for px, py in path[:-1]:
+                        await self.page.mouse.move(px, py)
+                        await asyncio.sleep(0.02)
+                    x, y = path[-1]
+                    source = "trajectory_trm"
             await self.page.mouse.click(x, y)
         
         duration = (time.time() - start) * 1000

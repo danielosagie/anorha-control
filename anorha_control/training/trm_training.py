@@ -56,6 +56,9 @@ class TrainingConfig:
     sequence_length: int = 10  # History of positions
     augment: bool = True
     normalize: bool = True
+    include_failed: bool = False  # Include failed trajectories (correct target, learn to avoid wrong endpoints)
+    failed_weight: float = 0.5  # Down-weight failed samples in loss
+    resolution_augment: bool = True  # Random viewport scale simulation
     
     # Checkpointing
     save_every: int = 10
@@ -105,20 +108,28 @@ class TrajectoryDataset(Dataset):
         
         # Convert trajectories to training samples
         for traj in trajectories:
-            if not traj.get("success", False):
-                continue  # Only train on successful trajectories
+            success = traj.get("success", False)
+            if not success and not self.config.include_failed:
+                continue
+            failed_weight = 1.0 if success else self.config.failed_weight
             
             target = traj["target"]
             screen_size = traj.get("screen_size", [1920, 1080])
             trajectory = traj["trajectory"]
+            already_normalized = traj.get("normalized", False)
             
             # Create samples from trajectory points
             for i in range(len(trajectory) - 1):
                 current = trajectory[i]
                 next_point = trajectory[i + 1]
                 
-                # Normalize coordinates
-                if self.config.normalize:
+                # Normalize coordinates (skip if stored format is already 0-1)
+                if already_normalized:
+                    cur_x, cur_y = current["x"], current["y"]
+                    tar_x, tar_y = target["x"], target["y"]
+                    next_x, next_y = next_point["x"], next_point["y"]
+                    vx, vy = current.get("vx", 0), current.get("vy", 0)
+                elif self.config.normalize:
                     cur_x = current["x"] / screen_size[0]
                     cur_y = current["y"] / screen_size[1]
                     tar_x = target["x"] / screen_size[0]
@@ -141,7 +152,10 @@ class TrajectoryDataset(Dataset):
                 
                 self.samples.append({
                     "input": torch.tensor(input_vec, dtype=torch.float32),
-                    "output": torch.tensor(output_vec, dtype=torch.float32)
+                    "output": torch.tensor(output_vec, dtype=torch.float32),
+                    "weight": failed_weight,
+                    "task_type": traj.get("task_type", ""),
+                    "source": traj.get("source", ""),
                 })
     
     def __len__(self):
@@ -157,7 +171,7 @@ class TrajectoryDataset(Dataset):
         return sample
     
     def _augment(self, sample: Dict) -> Dict:
-        """Apply data augmentation."""
+        """Apply data augmentation including resolution simulation."""
         inp = sample["input"].clone()
         out = sample["output"].clone()
         
@@ -175,12 +189,25 @@ class TrajectoryDataset(Dataset):
             inp[5] = -inp[5]       # vy
             out[1] = 1.0 - out[1]  # next_y
         
+        # Resolution augmentation: random scale/offset for different viewport sizes
+        if self.config.resolution_augment:
+            scale = 0.98 + 0.04 * np.random.random()
+            offset_x = (np.random.random() - 0.5) * 0.02
+            offset_y = (np.random.random() - 0.5) * 0.02
+            for idx in [0, 2]:
+                inp[idx] = (inp[idx] * scale + offset_x).clamp(0, 1)
+            for idx in [1, 3]:
+                inp[idx] = (inp[idx] * scale + offset_y).clamp(0, 1)
+            out[0] = (out[0] * scale + offset_x).clamp(0, 1)
+            out[1] = (out[1] * scale + offset_y).clamp(0, 1)
+        
         # Small position noise
         noise = torch.randn(2) * 0.01
         inp[0:2] += noise
         out[0:2] += noise
         
-        return {"input": inp, "output": out}
+        weight = sample.get("weight", 1.0)
+        return {"input": inp, "output": out, "weight": weight}
 
 
 class TrajectoryTRM(nn.Module):
@@ -352,18 +379,27 @@ class TRMTrainer:
         return history
     
     def _train_step(self, batch: Dict) -> Tuple[float, float, float]:
-        """Single training step."""
+        """Single training step. Uses sample weights for failed trajectories."""
         self.optimizer.zero_grad()
         
         inputs = batch["input"].to(self.config.device)
         targets = batch["output"].to(self.config.device)
+        weights = batch.get("weight", torch.ones(inputs.size(0), device=inputs.device))
+        if isinstance(weights, (int, float)):
+            weights = torch.full((inputs.size(0),), weights, device=inputs.device)
+        else:
+            weights = weights.to(self.config.device)
         
         # Forward
         pred_coords, pred_click = self.model(inputs)
         
-        # Loss
-        coord_loss = self.coord_loss(pred_coords, targets[:, :2])
-        click_loss = self.click_loss(pred_click.squeeze(), targets[:, 2])
+        # Loss (per-sample, then weighted mean)
+        coord_loss_per = (pred_coords - targets[:, :2]) ** 2
+        coord_loss = (coord_loss_per.mean(dim=1) * weights).sum() / weights.sum().clamp(min=1e-6)
+        click_loss_per = nn.functional.binary_cross_entropy(
+            pred_click.squeeze(), targets[:, 2], reduction="none"
+        )
+        click_loss = (click_loss_per * weights).sum() / weights.sum().clamp(min=1e-6)
         
         # Combined loss (coords more important than click)
         total_loss = 0.7 * coord_loss + 0.3 * click_loss
@@ -413,6 +449,27 @@ class TRMTrainer:
         self.step = checkpoint.get("step", 0)
         self.best_loss = checkpoint.get("best_loss", float('inf'))
         print(f"[TRMTrainer] Loaded checkpoint from {path}")
+
+
+def load_trajectory_trm(
+    checkpoint_path: str,
+    device: str = None,
+    config: TrainingConfig = None,
+) -> TrajectoryTRM:
+    """
+    Load TrajectoryTRM for inference (trajectory smoothing).
+    Used by ComputerAgent for smooth mouse movement from current pos to target.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device or "cpu")
+    cfg = config or checkpoint.get("config")
+    if cfg is None or not isinstance(cfg, TrainingConfig):
+        cfg = TrainingConfig()
+    model = TrajectoryTRM(cfg)
+    model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    model.eval()
+    dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(dev)
+    return model
     
     def evaluate(self, test_path: str) -> Dict[str, float]:
         """

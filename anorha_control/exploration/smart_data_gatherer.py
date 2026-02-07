@@ -28,9 +28,11 @@ from PIL import Image
 
 # Local imports
 from ..models.vlm_subsystems import VLMSubsystems, GroundingResult
+from .grounding_harness import GroundingHarness, GroundingHarnessResult
 from ..models.local_llm import LocalLLM, TaskPlanner
 from ..utils.overlay import get_indicator
 from .task_curriculum import TaskCurriculum, Difficulty
+from .execution_backend import BrowserBackend, DesktopBackend, ExecutionBackend
 
 try:
     import torch
@@ -53,15 +55,16 @@ class TrajectoryPoint:
 
 @dataclass
 class TrajectoryData:
-    """Complete trajectory data for TRM training."""
+    """Complete trajectory data for TRM training. Uses normalized coords (0-1) for scale across screen sizes."""
     task_id: str
-    target: Dict[str, int]  # {x, y}
-    trajectory: List[Dict[str, Any]] = field(default_factory=list)
+    target: Dict[str, float]  # {x, y} in 0-1 normalized
+    trajectory: List[Dict[str, Any]] = field(default_factory=list)  # x, y, vx, vy in 0-1
     success: bool = False
     screen_size: List[int] = field(default_factory=lambda: [1920, 1080])
     task_type: str = ""  # click, type, scroll
     source: str = "vlm"  # vlm, human, random
     timestamp: str = ""
+    normalized: bool = True  # coords are 0-1; screen_size used for denormalization when executing
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -144,8 +147,14 @@ class GathererConfig:
     
     # Episode settings
     max_episode_steps: int = 15
-    action_delay: float = 0.2  # Snappy like human (was 0.5)
+    action_delay: float = 0.2  # Fallback when action type unknown
+    # Action-specific delays: type needs longer for phash to detect input change
+    action_delay_type: float = 0.4
+    action_delay_click: float = 0.3
+    action_delay_press_enter: float = 0.5
+    use_vlm_verification: bool = False  # VLM confirm success (slow, ~1 call per trajectory)
     max_difficulty: Difficulty = Difficulty.MEDIUM
+    execution_backend: str = "browser"  # "browser" or "desktop" for full computer use
     
     def __post_init__(self):
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -186,11 +195,15 @@ class SmartDataGatherer:
         # Task curriculum
         self.curriculum = TaskCurriculum(max_difficulty=self.config.max_difficulty)
         
-        # Playwright
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        # Execution backend (browser or desktop)
+        if self.config.execution_backend == "desktop":
+            self.backend: ExecutionBackend = DesktopBackend()
+        else:
+            self.backend = BrowserBackend(
+                viewport_width=self.config.viewport_width,
+                viewport_height=self.config.viewport_height,
+                headless=self.config.headless,
+            )
         
         # Control
         self._running = False
@@ -208,6 +221,9 @@ class SmartDataGatherer:
             width=overlay_w,
             height=overlay_h
         )
+        
+        # Robust grounding harness (multi-strategy for 97% accuracy)
+        self.grounding_harness = GroundingHarness(self.vlm)
         
         # Load existing progress
         self._load_progress()
@@ -336,66 +352,23 @@ class SmartDataGatherer:
         print(f"   💾 Saved {len(batch)} trajectories to {data_file.name}")
         self._save_progress()
     
-    async def _init_browser(self):
-        """Initialize Playwright browser."""
-        from playwright.async_api import async_playwright
-        
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.config.headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                f"--window-size={self.config.viewport_width},{self.config.viewport_height}",
-                "--window-position=0,0",  # Keep it top-left
-                "--no-default-browser-check",
-                "--no-first-run",
-            ]
-        )
-        self._context = await self._browser.new_context(
-            viewport={"width": self.config.viewport_width, "height": self.config.viewport_height},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
-        )
-        self._page = await self._context.new_page()
+    async def _init_backend(self):
+        """Initialize execution backend (browser or desktop)."""
+        if isinstance(self.backend, BrowserBackend):
+            await self.backend.init()
     
-    async def _close_browser(self):
-        """Close browser gracefully."""
-        try:
-            if self._page:
-                await self._page.close()
-            if self._context:
-                await self._context.close()
-            if self._browser:
-                await self._browser.close()
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception:
-            pass
-        self._page = None
-        self._context = None
-        self._browser = None
-        self._playwright = None
+    async def _close_backend(self):
+        """Close backend (browser)."""
+        if isinstance(self.backend, BrowserBackend):
+            await self.backend.close()
     
-    async def _ensure_browser(self) -> bool:
-        """Ensure browser is alive; restart if needed. Returns True if ready."""
-        try:
-            if self._page and not self._page.is_closed():
-                return True
-        except Exception:
-            pass
-        # Browser dead - restart
-        print("   🔧 Browser restart...")
-        await self._close_browser()
-        await asyncio.sleep(2)
-        await self._init_browser()
-        return True
+    async def _ensure_backend(self) -> bool:
+        """Ensure backend is ready. Returns True if ready."""
+        return await self.backend.ensure_ready()
     
     async def _screenshot(self) -> Image.Image:
-        """Capture screenshot. Raises if page is dead."""
-        if not self._page:
-            raise RuntimeError("No browser page")
-        buffer = await self._page.screenshot()
-        import io
-        return Image.open(io.BytesIO(buffer))
+        """Capture screenshot."""
+        return await self.backend.screenshot()
     
     def _is_page_crash(self, e: Exception) -> bool:
         """Check if error indicates page crash (needs browser restart)."""
@@ -403,19 +376,20 @@ class SmartDataGatherer:
         return "crashed" in msg or "page closed" in msg
     
     async def _navigate(self, url: str) -> bool:
-        """Navigate to URL. Restarts browser on crash, retries on failure."""
+        """Navigate to URL or desktop context."""
         for attempt in range(3):
             try:
-                await self._page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                await asyncio.sleep(1)  # Wait for page to settle
-                return True
+                ok = await self.backend.navigate(url)
+                if ok:
+                    await asyncio.sleep(1)
+                return ok
             except Exception as e:
                 print(f"   ⚠️ Navigation failed (attempt {attempt + 1}/3): {str(e)[:80]}...")
-                if self._is_page_crash(e):
-                    print("   🔧 Page crashed - restarting browser...")
-                    await self._close_browser()
+                if self._is_page_crash(e) and isinstance(self.backend, BrowserBackend):
+                    print("   🔧 Browser crashed - restarting...")
+                    await self._close_backend_safe()
                     await asyncio.sleep(3)
-                    await self._init_browser()
+                    await self._init_backend()
                 elif attempt < 2:
                     await asyncio.sleep(2)
         return False
@@ -468,14 +442,18 @@ class SmartDataGatherer:
         target_x: int,
         target_y: int,
         action_type: str = "click",
-        text: str = None
+        text: str = None,
+        target_label: str = "",
+        value_label: str = "",
+        task_objective: str = "",
     ) -> Optional[TrajectoryData]:
         """
         Execute an action and record the trajectory.
         """
         # Get current mouse position (center of viewport as starting point)
-        start_x = random.randint(100, self.config.viewport_width - 100)
-        start_y = random.randint(100, self.config.viewport_height - 100)
+        vw, vh = self.backend.viewport_size()
+        start_x = random.randint(100, vw - 100)
+        start_y = random.randint(100, vh - 100)
         
         # Record trajectory (snappy: 150-350ms like human)
         trajectory = await self._record_trajectory(
@@ -488,44 +466,97 @@ class SmartDataGatherer:
         before_screenshot = await self._screenshot()
         
         if action_type == "click":
-            await self._page.mouse.click(target_x, target_y)
+            await self.backend.click(target_x, target_y)
         elif action_type == "press_enter":
-            await self._page.mouse.click(target_x, target_y)
+            await self.backend.click(target_x, target_y)
             await asyncio.sleep(0.05)
-            await self._page.keyboard.press("Enter")
+            await self.backend.press_key("Enter")
         elif action_type == "type" and text:
-            await self._page.mouse.click(target_x, target_y)
+            await self.backend.click(target_x, target_y)
             await asyncio.sleep(0.05)
-            await self._page.keyboard.type(text)
+            await self.backend.type_text(text)
         
-        await asyncio.sleep(self.config.action_delay)
-        after_screenshot = await self._screenshot()
+        # Multi-frame sampling: first sample uses action-specific delay, then +0.3s, +0.5s
+        delay = getattr(self.config, f"action_delay_{action_type}", None) or self.config.action_delay
+        sample_times = [delay, delay + 0.3, delay + 0.5]
+        success = False
+        last_t = 0.0
+        after_screenshot = before_screenshot  # fallback
+        for t in sample_times:
+            await asyncio.sleep(t - last_t)
+            last_t = t
+            frame = await self._screenshot()
+            after_screenshot = frame
+            if self._check_action_success(before_screenshot, frame, center=(target_x, target_y)):
+                success = True
+                break
         
-        # Verify action success
-        success = self._check_action_success(before_screenshot, after_screenshot)
+        # Optional VLM verification (overrides phash result)
+        if self.config.use_vlm_verification:
+            action_desc = (
+                f"typed '{value_label}' into {target_label}" if action_type == "type" and value_label
+                else f"clicked {target_label}" if target_label
+                else f"{action_type} at ({target_x}, {target_y})"
+            )
+            result = self.vlm.verify(action_desc, before_screenshot, after_screenshot, task=task_objective)
+            success = result.success
+            if result.reason:
+                print(f"      [VLM verify] {result.reason[:80]}")
         
-        # Create trajectory data
+        # Store in normalized format (0-1) for scale across screen sizes
+        w, h = self.backend.viewport_size()
+        target_norm = {"x": target_x / w, "y": target_y / h}
+        traj_norm = [
+            {
+                "t": p["t"],
+                "x": p["x"] / w,
+                "y": p["y"] / h,
+                "vx": p.get("vx", 0) / w,
+                "vy": p.get("vy", 0) / h,
+                "click": p.get("click", False),
+            }
+            for p in trajectory
+        ]
         traj_data = TrajectoryData(
             task_id=f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{random.randint(1000,9999)}",
-            target={"x": target_x, "y": target_y},
-            trajectory=trajectory,
+            target=target_norm,
+            trajectory=traj_norm,
             success=success,
-            screen_size=[self.config.viewport_width, self.config.viewport_height],
+            screen_size=[w, h],
             task_type=action_type,
             source="vlm",
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            normalized=True,
         )
         
         return traj_data
     
-    def _check_action_success(self, before: Image.Image, after: Image.Image) -> bool:
+    def _crop_roi(self, img: Image.Image, cx: int, cy: int, size: int = 400) -> Image.Image:
+        """Crop 400x400 region centered on (cx, cy), clamped to image bounds."""
+        w, h = img.size
+        if w == 0 or h == 0:
+            return img
+        half = size // 2
+        x1 = max(0, cx - half)
+        y1 = max(0, cy - half)
+        x2 = min(w, cx + half)
+        y2 = min(h, cy + half)
+        if x2 <= x1 or y2 <= y1:
+            return img  # Invalid crop, use full image
+        return img.crop((x1, y1, x2, y2))
+    
+    def _check_action_success(
+        self, before: Image.Image, after: Image.Image, center: Tuple[int, int] = None
+    ) -> bool:
         """
         Check if action caused meaningful change. Uses perceptual hash.
-        - False positives: animations, ads, timers can trigger phash change
-        - False negatives: small typing, slow navigation may not change phash in 0.2s
-        Similarity < 0.97 = meaningful change (filters tiny/noise changes).
+        If center provided, hash ROI only (reduces false positives from global animations).
+        Similarity < 0.97 = meaningful change.
         """
         from ..utils.hashing import phash_image, hash_similarity
+        if center:
+            before = self._crop_roi(before, center[0], center[1])
+            after = self._crop_roi(after, center[0], center[1])
         hash_before = phash_image(before)
         hash_after = phash_image(after)
         sim = hash_similarity(hash_before, hash_after)
@@ -562,27 +593,100 @@ class SmartDataGatherer:
         
         return []
     
+    def _get_page(self):
+        """Get Playwright page if using BrowserBackend."""
+        return getattr(self.backend, "page", None)
+    
+    async def _get_playwright_elements(self) -> List[Dict[str, Any]]:
+        """
+        Get clickable elements from DOM (buttons, links, inputs) with bbox.
+        Used by grounding harness for fast text match when VLM/OCR would fail.
+        """
+        page = self._get_page()
+        if not page:
+            return []
+        elements = []
+        max_elements = 30  # Limit DOM queries for speed
+        try:
+            selectors = [
+                "button, input[type=submit], input[type=button], [role=button]",
+                "a[href]",
+                "input:not([type=hidden]):not([type=submit]):not([type=button]), textarea",
+            ]
+            for sel in selectors:
+                if len(elements) >= max_elements:
+                    break
+                els = await page.query_selector_all(sel)
+                for el in els[:max_elements - len(elements)]:
+                    if not el or self._killed:
+                        break
+                    try:
+                        await el.scroll_into_view_if_needed(timeout=3000)
+                        box = await el.bounding_box()
+                        if not box:
+                            continue
+                        text = (await el.inner_text() or "").strip()
+                        placeholder = await el.get_attribute("placeholder") or ""
+                        if not text and placeholder:
+                            text = placeholder
+                        if not text and "input" in sel:
+                            text = await el.get_attribute("name") or await el.get_attribute("aria-label") or ""
+                        elements.append({
+                            "text": text.strip(),
+                            "x": int(box["x"]),
+                            "y": int(box["y"]),
+                            "width": int(box["width"]),
+                            "height": int(box["height"]),
+                        })
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return elements
+
+    async def _close_backend_safe(self):
+        """Close backend, swallowing errors on interrupt."""
+        try:
+            await self._close_backend()
+        except Exception:
+            pass
+    
     async def _playwright_first_plan(self, task) -> List[Dict[str, Any]]:
         """
         Playwright-first: DOM-based planning. Fast, no VLM.
         Returns steps with optional "bbox" (x,y,w,h) for direct execution.
         """
-        if not self._page:
+        page = self._get_page()
+        if not page:
             return []
         
         steps = []
         obj_lower = task.objective.lower()
         sample_data = task.sample_data or {}
+        site = (task.site or "").lower()
         
-        # Skip form fallback for calculator (needs button clicks, not form fill)
-        if "solve" in obj_lower or "calculator" in obj_lower or "expression" in (sample_data or {}):
-            return []
+        # 1. Calculator: BasicCalculator has First number, Second number, Operation, Calculate
+        if ("solve" in obj_lower or "calculator" in obj_lower) and "testsheepnz" in site:
+            steps = await self._playwright_calculator_steps(task)
+            if steps:
+                return steps
         
-        # Search task: find search input, type query
-        if "search" in obj_lower or "query" in sample_data:
+        # 2. GitHub search: input[name="q"], press Enter (no submit button)
+        if "github.com" in site and ("search" in obj_lower or "query" in sample_data):
+            steps = await self._playwright_github_search_steps(task)
+            if steps:
+                return steps
+        
+        # 3. Wikipedia: extract query from "article about 'X'", type in search, Enter, click first result
+        if "wikipedia" in site and ("article" in obj_lower or "find" in obj_lower):
+            steps = await self._playwright_wikipedia_search_steps(task)
+            if steps:
+                return steps
+        
+        # 4. Generic search task
+        if "search" in obj_lower or "find" in obj_lower or "query" in sample_data:
             query = sample_data.get("query") or sample_data.get("q") or ""
             if not query and "search" in obj_lower:
-                # Extract from objective: "Search for 'X'" or "Search for a book"
                 if " for " in task.objective:
                     parts = task.objective.split(" for ", 1)
                     if len(parts) > 1:
@@ -590,26 +694,42 @@ class SmartDataGatherer:
                 if not query:
                     query = "book" if "book" in obj_lower else "search"
             if query:
-                search_el = await self._page.query_selector(
-                    'input[type="search"], input[name*="search"], input[placeholder*="search"], '
-                    'input[placeholder*="Search"], input[aria-label*="search"], input[id*="search"]'
+                search_el = await page.query_selector(
+                    'input[name="q"], input[type="search"], input[name*="search"], '
+                    'input[placeholder*="search"], input[placeholder*="Search"], '
+                    'input[aria-label*="search"], input[id*="search"]'
                 )
                 if search_el:
                     try:
-                        box = await search_el.bounding_box()
-                        if box:
-                            cx = int(box["x"] + box["width"] / 2)
-                            cy = int(box["y"] + box["height"] / 2)
-                            steps.append({"action": "type", "target": "search", "value": query, "x": cx, "y": cy})
-                            # Add Enter or search button click
-                            submit = await self._page.query_selector('button[type="submit"], input[type="submit"], [aria-label*="search" i]')
-                            if submit:
-                                sbox = await submit.bounding_box()
-                                if sbox:
-                                    steps.append({"action": "click", "target": "search submit", "x": int(sbox["x"]+sbox["width"]/2), "y": int(sbox["y"]+sbox["height"]/2)})
-                            else:
-                                steps.append({"action": "press_enter", "target": "", "value": "", "x": cx, "y": cy})
-                            print(f"   📋 Playwright search: type '{query[:20]}...' in search box")
+                        step1 = {"action": "type", "target": "search", "value": query}
+                        try:
+                            await search_el.scroll_into_view_if_needed()
+                            box = await search_el.bounding_box()
+                            if box:
+                                step1["x"] = int(box["x"] + box["width"] / 2)
+                                step1["y"] = int(box["y"] + box["height"] / 2)
+                        except Exception:
+                            pass
+                        steps.append(step1)
+                        submit = await page.query_selector('button[type="submit"], input[type="submit"], [aria-label*="search" i]')
+                        if submit:
+                            step2 = {"action": "click", "target": "search submit", "value": ""}
+                            try:
+                                await submit.scroll_into_view_if_needed()
+                                box = await submit.bounding_box()
+                                if box:
+                                    step2["x"] = int(box["x"] + box["width"] / 2)
+                                    step2["y"] = int(box["y"] + box["height"] / 2)
+                            except Exception:
+                                pass
+                            steps.append(step2)
+                        else:
+                            step_enter = {"action": "press_enter", "target": "search", "value": ""}
+                            if "x" in step1 and "y" in step1:
+                                step_enter["x"] = step1["x"]
+                                step_enter["y"] = step1["y"]
+                            steps.append(step_enter)
+                        print(f"   📋 Playwright search: type '{query[:20]}...' in search box")
                     except Exception:
                         pass
         
@@ -618,10 +738,192 @@ class SmartDataGatherer:
             if steps:
                 pass
         
-        # Generic input fallback: "type X into input" without sample_data
         if not steps and ("type" in obj_lower or "input" in obj_lower or "number" in obj_lower):
             steps = await self._generic_input_fallback(task)
         
+        return steps
+    
+    async def _playwright_calculator_steps(self, task) -> List[Dict[str, Any]]:
+        """BasicCalculator: parse expression (e.g. 42 + 13) into type/click steps."""
+        page = self._get_page()
+        if not page:
+            return []
+        sample_data = task.sample_data or {}
+        expr = sample_data.get("expression", "")
+        if not expr:
+            return []
+        # Parse simple "A op B" (e.g. 42 + 13, 25 * 4). Strip parens for "(25 * 4) - 17" -> take first op
+        import re
+        expr_clean = re.sub(r"[()]", " ", expr).strip()
+        op_map = {"+": "Add", "-": "Subtract", "*": "Multiply", "/": "Divide"}
+        m = re.search(r"(\d+)\s*([+\-*/])\s*(\d+)", expr_clean)
+        if not m:
+            return []
+        first, op_char, second = m.group(1), m.group(2), m.group(3)
+        op_label = op_map.get(op_char, "Add")
+        steps = []
+        labels = []
+        try:
+            labels = await page.query_selector_all("label")
+            # First number: by label or nth input
+            first_el = await page.query_selector(
+                'input[name*="first"], input[id*="first"], input[placeholder*="first"]'
+            )
+            if not first_el:
+                for lb in labels:
+                    lt = (await lb.inner_text() or "").lower()
+                    if "first" in lt and "number" in lt:
+                        fid = await lb.get_attribute("for")
+                        if fid:
+                            first_el = await page.query_selector(f'#{fid}')
+                        break
+            if not first_el:
+                inputs = await page.query_selector_all("input:not([type=hidden]):not([type=submit])")
+                if len(inputs) >= 1:
+                    first_el = inputs[0]
+            if first_el:
+                await first_el.scroll_into_view_if_needed()
+                box = await first_el.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "type", "target": "First number", "value": first,
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            # Operation: click Add/Subtract/etc
+            op_loc = page.locator(f'text={op_label}')
+            if await op_loc.count() > 0:
+                first_op = op_loc.first
+                await first_op.scroll_into_view_if_needed()
+                box = await first_op.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "click", "target": op_label, "value": "",
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            # Second number input
+            second_el = await page.query_selector(
+                'input[name*="second"], input[id*="second"]'
+            )
+            if not second_el:
+                for lb in labels:
+                    lt = (await lb.inner_text() or "").lower()
+                    if "second" in lt and "number" in lt:
+                        fid = await lb.get_attribute("for")
+                        if fid:
+                            second_el = await page.query_selector(f'#{fid}')
+                        break
+            if not second_el:
+                inputs = await page.query_selector_all("input:not([type=hidden]):not([type=submit])")
+                if len(inputs) >= 2:
+                    second_el = inputs[1]
+            if second_el:
+                await second_el.scroll_into_view_if_needed()
+                box = await second_el.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "type", "target": "Second number", "value": second,
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            # Calculate button
+            calc_el = await page.query_selector(
+                'button:has-text("Calculate"), input[value="Calculate"], [role="button"]:has-text("Calculate")'
+            )
+            if calc_el:
+                await calc_el.scroll_into_view_if_needed()
+                box = await calc_el.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "click", "target": "Calculate", "value": "",
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            if steps:
+                print(f"   📋 Playwright calculator: {expr} → {len(steps)} steps")
+        except Exception as e:
+            print(f"   ⚠️ Calculator steps failed: {e}")
+        return steps
+    
+    async def _playwright_github_search_steps(self, task) -> List[Dict[str, Any]]:
+        """GitHub search: input[name="q"], type query, press Enter (no submit button)."""
+        page = self._get_page()
+        if not page:
+            return []
+        sample_data = task.sample_data or {}
+        obj_lower = (task.objective or "").lower()
+        query = sample_data.get("query") or sample_data.get("q") or ""
+        if not query and "search" in obj_lower:
+            if " for " in task.objective:
+                parts = task.objective.split(" for ", 1)
+                if len(parts) > 1:
+                    query = parts[1].split(",")[0].split(" and ")[0].strip().strip("'\"").strip()
+        if not query:
+            return []
+        steps = []
+        try:
+            # GitHub uses input[name="q"] for main search
+            search_el = await page.query_selector('input[name="q"]')
+            if not search_el:
+                search_el = await page.query_selector(
+                    'input[placeholder*="Search"], input[aria-label*="Search"]'
+                )
+            if search_el:
+                await search_el.scroll_into_view_if_needed()
+                box = await search_el.bounding_box()
+                if box:
+                    step1 = {
+                        "action": "type", "target": "search", "value": query,
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    }
+                    steps.append(step1)
+                    step2 = {
+                        "action": "press_enter", "target": "search", "value": "",
+                        "x": step1["x"], "y": step1["y"]
+                    }
+                    steps.append(step2)
+                    if "view" in obj_lower or "top result" in obj_lower:
+                        steps.append({"action": "click", "target": "first repository", "value": ""})
+                    print(f"   📋 Playwright GitHub search: type '{query[:30]}...' + Enter")
+        except Exception as e:
+            print(f"   ⚠️ GitHub search failed: {e}")
+        return steps
+    
+    async def _playwright_wikipedia_search_steps(self, task) -> List[Dict[str, Any]]:
+        """Wikipedia: extract query from objective, type in search, Enter, click first result."""
+        page = self._get_page()
+        if not page:
+            return []
+        obj = task.objective or ""
+        obj_lower = obj.lower()
+        if "hyperlinks only" in obj_lower or "no search" in obj_lower:
+            return []  # Use links only, not search
+        query = ""
+        if "article about" in obj_lower:
+            after = obj_lower.split("article about", 1)[-1].strip()
+            query = after.split(" by ")[0].split(" using ")[0].strip().strip("'\"").strip()
+        if not query:
+            return []
+        steps = []
+        try:
+            search_el = await page.query_selector(
+                '#searchInput, input[name="search"], input[placeholder*="Search"]'
+            )
+            if search_el:
+                await search_el.scroll_into_view_if_needed()
+                box = await search_el.bounding_box()
+                if box:
+                    step1 = {
+                        "action": "type", "target": "Search Wikipedia", "value": query,
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    }
+                    steps.append(step1)
+                    step2 = {
+                        "action": "press_enter", "target": "Search Wikipedia", "value": "",
+                        "x": step1["x"], "y": step1["y"]
+                    }
+                    steps.append(step2)
+                    steps.append({"action": "click", "target": query, "value": ""})
+                    print(f"   📋 Playwright Wikipedia search: '{query}' + Enter")
+        except Exception as e:
+            print(f"   ⚠️ Wikipedia search failed: {e}")
         return steps
     
     async def _playwright_form_fallback_steps(self, task) -> List[Dict[str, Any]]:
@@ -629,7 +931,8 @@ class SmartDataGatherer:
         Use Playwright to find form fields and create type steps from sample_data.
         Works when VLM fails but we have labeled inputs (name, email, address, etc.).
         """
-        if not self._page or not task.sample_data:
+        page = self._get_page()
+        if not page or not task.sample_data:
             return []
         
         # Map sample_data keys to common field labels (partial match)
@@ -645,7 +948,7 @@ class SmartDataGatherer:
         used_keys = set()
         
         try:
-            inputs = await self._page.query_selector_all("input:not([type=hidden]):not([type=submit]):not([type=button]), textarea")
+            inputs = await page.query_selector_all("input:not([type=hidden]):not([type=submit]):not([type=button]), textarea")
             for el in inputs:
                 if not el:
                     continue
@@ -656,7 +959,7 @@ class SmartDataGatherer:
                 # Try <label for="id"> if we have id
                 label_text = ""
                 if id_attr:
-                    label_el = await self._page.query_selector(f'label[for="{id_attr}"]')
+                    label_el = await page.query_selector(f'label[for="{id_attr}"]')
                     if label_el:
                         label_text = (await label_el.inner_text() or "").strip()
                 
@@ -676,33 +979,34 @@ class SmartDataGatherer:
                     labels = key_to_labels.get(k, [k])
                     if any(l in label or label in l for l in labels) or k in label or label in k:
                         display_label = (label_text or placeholder or name or id_attr).strip()
+                        step = {"action": "type", "target": display_label or s_key, "value": s_val}
+                        # Add bbox so we skip VLM grounding
                         try:
+                            await el.scroll_into_view_if_needed()
                             box = await el.bounding_box()
                             if box:
-                                cx, cy = int(box["x"] + box["width"]/2), int(box["y"] + box["height"]/2)
-                                steps.append({"action": "type", "target": display_label or s_key, "value": s_val, "x": cx, "y": cy})
-                            else:
-                                steps.append({"action": "type", "target": display_label or s_key, "value": s_val})
+                                step["x"] = int(box["x"] + box["width"] / 2)
+                                step["y"] = int(box["y"] + box["height"] / 2)
                         except Exception:
-                            steps.append({"action": "type", "target": display_label or s_key, "value": s_val})
+                            pass
+                        steps.append(step)
                         used_keys.add(s_key)
                         break
             
             if steps:
-                submit_btn = await self._page.query_selector("button[type=submit], input[type=submit]")
+                submit_btn = await page.query_selector("button[type=submit], input[type=submit]")
                 submit_text = await submit_btn.inner_text() if submit_btn else None
+                step = {"action": "click", "target": (submit_text or "Submit").strip(), "value": ""}
                 try:
                     if submit_btn:
+                        await submit_btn.scroll_into_view_if_needed()
                         box = await submit_btn.bounding_box()
                         if box:
-                            cx, cy = int(box["x"] + box["width"]/2), int(box["y"] + box["height"]/2)
-                            steps.append({"action": "click", "target": (submit_text or "Submit").strip(), "value": "", "x": cx, "y": cy})
-                        else:
-                            steps.append({"action": "click", "target": (submit_text or "Submit").strip(), "value": ""})
-                    else:
-                        steps.append({"action": "click", "target": "Submit", "value": ""})
+                            step["x"] = int(box["x"] + box["width"] / 2)
+                            step["y"] = int(box["y"] + box["height"] / 2)
                 except Exception:
-                    steps.append({"action": "click", "target": (submit_text or "Submit").strip(), "value": ""})
+                    pass
+                steps.append(step)
                 print(f"   📋 Playwright form fallback: {len(steps)} steps from DOM")
         
         except Exception as e:
@@ -715,24 +1019,28 @@ class SmartDataGatherer:
         Fallback when task is "type into input" but we have no sample_data.
         Finds first visible input and creates a type step (e.g. "123" for numbers).
         """
-        if not self._page:
+        page = self._get_page()
+        if not page:
             return []
         obj_lower = task.objective.lower()
         try:
-            inputs = await self._page.query_selector_all(
+            inputs = await page.query_selector_all(
                 "input:not([type=hidden]):not([type=submit]):not([type=button]), textarea"
             )
             if not inputs:
                 return []
             el = inputs[0]
-            box = await el.bounding_box()
-            if not box:
-                return []
-            cx = int(box["x"] + box["width"] / 2)
-            cy = int(box["y"] + box["height"] / 2)
-            # Use "123" for number tasks, else "test"
             value = "123" if "number" in obj_lower else "test"
-            steps = [{"action": "type", "target": "input", "value": value, "x": cx, "y": cy}]
+            step = {"action": "type", "target": "input", "value": value}
+            try:
+                await el.scroll_into_view_if_needed()
+                box = await el.bounding_box()
+                if box:
+                    step["x"] = int(box["x"] + box["width"] / 2)
+                    step["y"] = int(box["y"] + box["height"] / 2)
+            except Exception:
+                pass
+            steps = [step]
             print(f"   📋 Playwright generic input: type '{value}' in first input")
             return steps
         except Exception:
@@ -757,15 +1065,59 @@ class SmartDataGatherer:
         except Exception as e:
             if self._is_browser_error(e):
                 raise  # Let main loop restart browser
-            print(f"   🔧 Episode error (recovering): {e}")
+            print(f"   🔧 Episode error (recovering): {type(e).__name__}: {e}")
             self.progress.episodes_completed += 1
             self._save_progress()
             return []
     
+    def _fmt_duration(self, sec: float) -> str:
+        """Format duration: ms if < 1s, seconds if < 60s, else minutes."""
+        if sec < 1:
+            return f"({int(sec * 1000)}ms)"
+        if sec < 60:
+            return f"({sec:.1f}s)"
+        m = int(sec // 60)
+        s = sec % 60
+        return f"({m}m {s:.1f}s)"
+    
+    def _build_state_context(
+        self, last_step_desc: str, screenshot: Image.Image, task_objective: str
+    ) -> str:
+        """Build context for re-planning. Skip OCR (saves 2-10s)—VLM has screenshot."""
+        if not last_step_desc:
+            return ""
+        return f"Done: {last_step_desc}. Next: {task_objective}"
+    
+    def _task_has_more_to_do(
+        self, task, steps_done: int, last_action: str = ""
+    ) -> bool:
+        """Heuristic: task implies more work after these steps."""
+        obj = (task.objective or "").lower()
+        last = (last_action or "").lower()
+        # Don't re-plan after we just submitted—form is done
+        if "submit" in last or "login" in last:
+            return False
+        # Don't re-plan if we've done 3+ steps on a simple form task
+        if steps_done >= 3 and ("form" in obj or "submit" in obj or "fill" in obj):
+            return False
+        more_phrases = [
+            "and view", "and click", "add to cart", "proceed to", "find the answer",
+            "view the top", "open the file", "view their",
+            "and go", "and navigate", "go to", "and open", "and find", "and search",
+            "file explorer", "downloads folder", "downloads", "navigate to",
+        ]
+        if any(p in obj for p in more_phrases):
+            return True
+        if " and " in obj and steps_done < 2:
+            return True
+        if steps_done < 2 and len(obj) > 50:
+            return True
+        return False
+    
     async def _run_episode_impl(self) -> List[TrajectoryData]:
-        """Inner episode logic - may raise on browser/VLM errors."""
+        """Inner episode logic - may raise on browser/VLM errors. Iterative re-planning."""
         episode_trajectories = []
-        task = self.curriculum.sample_task()
+        task = self.curriculum.sample_task(backend=self.config.execution_backend)
         
         print(f"\n📍 Episode {self.progress.episodes_completed + 1}")
         print(f"   Site: {task.site}")
@@ -777,97 +1129,145 @@ class SmartDataGatherer:
         if not await self._navigate(task.site):
             return []
         
-        screenshot = await self._screenshot()
-        vlm_img, scale_x, scale_y = self._resize_for_vlm(screenshot)
         sample_data = task.sample_data or {}
+        steps_done = 0
+        last_success = False
+        last_step_desc = ""  # "click 'Submit'" - passed to next plan for context
         
-        # Playwright-first: DOM-based (search, forms) - fast, no VLM
-        steps = await self._playwright_first_plan(task)
-        if not steps:
-            # VLM: visual planning for complex tasks (retry once if garbage)
-            steps = self.vlm.plan(task.objective, vlm_img, sample_data)
-            if not steps:
-                screenshot = await self._screenshot()
-                vlm_img, _, _ = self._resize_for_vlm(screenshot)
-                steps = self.vlm.plan(task.objective, vlm_img, sample_data)
-        if not steps and "click" in task.objective.lower():
-            # OCR fallback: find task-relevant text and click it
-            steps = self._ocr_fallback_steps(task, vlm_img)
-        if not steps:
-            print("   ⚠️ VLM returned no steps. Skipping.")
-            self.progress.episodes_completed += 1
-            return []
-        
-        print(f"   📋 Planned {len(steps)} steps")
-        
-        # Execute each step (filter None and invalid steps from OCR/fallback)
-        steps = [
-            s for s in steps[:self.config.max_episode_steps]
-            if s is not None and (isinstance(s, dict) or (hasattr(s, "action") and hasattr(s, "target")))
-        ]
-        for i, step in enumerate(steps):
-            if self._killed or self._paused:
-                break
-            
-            while self._paused:
+        while steps_done < self.config.max_episode_steps and not self._killed:
+            if self._paused:
                 await asyncio.sleep(0.5)
-            
-            action = step.get("action", "click") if isinstance(step, dict) else step.action
-            target = step.get("target", "") if isinstance(step, dict) else step.target
-            value = step.get("value", "") if isinstance(step, dict) else step.value
-            
-            # Skip steps with no target and no coords
-            has_coords = "x" in step and "y" in step
-            if not has_coords and not (target or "").strip():
-                print(f"   Step {i+1}: {action} '{target}' → ⚠️ Skipped (empty target, no coords)")
                 continue
             
-            print(f"   Step {i+1}: {action} '{target}'")
+            screenshot = await self._screenshot()
+            vlm_img, scale_x, scale_y = self._resize_for_vlm(screenshot)
+            plan_start = time.time()
             
-            # Direct coords from Playwright (skip VLM/OCR)
-            if has_coords:
-                target_x = int(step["x"])
-                target_y = int(step["y"])
-            else:
-                # Ground: OCR first, then VLM
-                screenshot = await self._screenshot()
-                vlm_img, scale_x, scale_y = self._resize_for_vlm(screenshot)
-                coords = self.vlm.find_text(target, vlm_img)
-                if coords:
-                    grounding = GroundingResult(found=True, x=coords[0], y=coords[1])
-                else:
-                    grounding = self.vlm.locate(target, vlm_img)
-                if not grounding.found:
-                    print(f"      ❌ Element not found")
-                    self.progress.failed_trajectories += 1
-                    self.progress.total_trajectories += 1
+            # Playwright-first (only on first plan; skip for re-plan)
+            steps = [] if steps_done > 0 else await self._playwright_first_plan(task)
+            plan_source = "playwright"
+            if not steps:
+                plan_source = "vlm"
+                # Build state context for re-plan: what we did, what's visible, what's next
+                state_context = self._build_state_context(
+                    last_step_desc, screenshot, task.objective
+                )
+                steps = self.vlm.plan(
+                    task.objective, vlm_img, sample_data,
+                    state_context=state_context,
+                )
+                if not steps:
+                    screenshot = await self._screenshot()
+                    vlm_img, _, _ = self._resize_for_vlm(screenshot)
+                    state_context = self._build_state_context(
+                        last_step_desc, screenshot, task.objective
+                    )
+                    steps = self.vlm.plan(
+                        task.objective, vlm_img, sample_data,
+                        state_context=state_context,
+                    )
+            if not steps and "click" in task.objective.lower():
+                plan_source = "ocr"
+                steps = self._ocr_fallback_steps(task, vlm_img)
+            
+            if not steps:
+                break
+            
+            steps = [
+                s for s in steps[:self.config.max_episode_steps - steps_done]
+                if s is not None and (isinstance(s, dict) or (hasattr(s, "action") and hasattr(s, "target")))
+            ]
+            if not steps:
+                break
+            
+            plan_sec = time.time() - plan_start
+            print(f"   📋 Planned {len(steps)} steps [{plan_source}] {self._fmt_duration(plan_sec)}")
+            should_replan = False
+            
+            for i, step in enumerate(steps):
+                if self._killed or self._paused or steps_done >= self.config.max_episode_steps:
+                    break
+                
+                while self._paused:
+                    await asyncio.sleep(0.5)
+                
+                action = step.get("action", "click") if isinstance(step, dict) else step.action
+                target = (step.get("target", "") if isinstance(step, dict) else step.target or "").strip()
+                raw_value = step.get("value", "") if isinstance(step, dict) else step.value
+                value = raw_value if isinstance(raw_value, str) else (str(raw_value) if raw_value else "")
+                if (action or "").lower() in ("submit", "press", "button") or "click" in (action or "").lower():
+                    action = "click"
+                
+                has_coords = "x" in step and "y" in step
+                if not has_coords and not (target or "").strip():
+                    print(f"   Step {steps_done+1}: {action} '{target}' → ⚠️ Skipped")
                     continue
-                target_x = int(grounding.x * scale_x)
-                target_y = int(grounding.y * scale_y)
-            
-            # Execute and record
-            act_type = "press_enter" if action == "press_enter" else action
-            traj = await self._execute_and_record(
-                target_x, target_y,
-                action_type=act_type,
-                text=value if action == "type" else None
-            )
-            
-            if traj:
-                episode_trajectories.append(traj)
                 
-                if traj.success:
-                    self.progress.successful_trajectories += 1
-                    print(f"      ✅ Success ({target_x}, {target_y})")
+                print(f"   Step {steps_done+1}: {action} '{target}'")
+                step_start = time.time()
+                
+                if has_coords:
+                    target_x = int(step["x"])
+                    target_y = int(step["y"])
                 else:
-                    self.progress.failed_trajectories += 1
-                    print(f"      ⚠️ No visible change")
+                    screenshot = await self._screenshot()
+                    # Robust grounding: DOM → OCR → OCR fuzzy → VLM → VLM retry
+                    playwright_elements = await self._get_playwright_elements() if self._get_page() else []
+                    grounding = await self.grounding_harness.ground(
+                        target, screenshot,
+                        task_objective=task.objective or "",
+                        playwright_elements=playwright_elements,
+                    )
+                    if not grounding.found:
+                        step_sec = time.time() - step_start
+                        print(f"      ❌ Element not found (target: '{target}') {self._fmt_duration(step_sec)}")
+                        self.progress.failed_trajectories += 1
+                        self.progress.total_trajectories += 1
+                        continue
+                    target_x = int(grounding.x)
+                    target_y = int(grounding.y)
                 
-                self.progress.total_trajectories += 1
+                act_type = "press_enter" if action == "press_enter" else action
+                traj = await self._execute_and_record(
+                    target_x, target_y,
+                    action_type=act_type,
+                    text=value if action == "type" else None,
+                    target_label=target,
+                    value_label=value,
+                    task_objective=task.objective,
+                )
+                
+                if traj:
+                    steps_done += 1
+                    step_source = "playwright" if has_coords else "vlm"
+                    if step_source != "playwright":
+                        episode_trajectories.append(traj)
+                    step_sec = time.time() - step_start
+                    if traj.success:
+                        last_success = True
+                        if step_source != "playwright":
+                            self.progress.successful_trajectories += 1
+                        print(f"      ✅ Success ({target_x}, {target_y}) {self._fmt_duration(step_sec)}")
+                        # Only re-plan when we've finished ALL steps in current batch
+                        if i >= len(steps) - 1 and self._task_has_more_to_do(task, steps_done, last_action=action):
+                            should_replan = True
+                            last_step_desc = f"{action} '{target}'"
+                            if value and action == "type":
+                                v = str(value)[:30] + "..." if len(str(value)) > 30 else str(value)
+                                last_step_desc += f" (typed '{v}')"
+                            await asyncio.sleep(1.5)
+                            break
+                    else:
+                        self.progress.failed_trajectories += 1
+                        print(f"      ⚠️ No visible change {self._fmt_duration(step_sec)}")
+                    self.progress.total_trajectories += 1
+            
+            if not should_replan:
+                break
         
         self.progress.episodes_completed += 1
         ep_sec = time.time() - ep_start
-        if ep_sec >= 5:  # Log VLM-heavy episodes (Playwright-only is usually <2s)
+        if ep_sec >= 5:
             print(f"   ⏱️ Episode: {ep_sec:.1f}s")
         return episode_trajectories
     
@@ -889,10 +1289,10 @@ class SmartDataGatherer:
         print(f"   Remaining: {self.progress.target_trajectories - self.progress.successful_trajectories}")
         
         self.indicator.start()
-        # Init browser with retry
+        # Init backend with retry
         for init_attempt in range(3):
             try:
-                await self._init_browser()
+                await self._init_backend()
                 break
             except Exception as e:
                 print(f"   🔧 Browser init failed (attempt {init_attempt + 1}/3): {e}")
@@ -911,8 +1311,8 @@ class SmartDataGatherer:
                     print(f"\n🎉 Target reached! {self.progress.successful_trajectories} trajectories collected")
                     break
                 
-                # Ensure browser is alive before each episode
-                await self._ensure_browser()
+                # Ensure backend is ready before each episode
+                await self._ensure_backend()
                 
                 try:
                     episode_trajs = await self._run_episode()
@@ -923,10 +1323,10 @@ class SmartDataGatherer:
                     print(f"   🔧 Episode crash ({consecutive_errors}/{max_consecutive_errors}): {e}")
                     self._save_progress()
                     if consecutive_errors >= max_consecutive_errors:
-                        print("   🔧 Too many consecutive errors - restarting browser...")
-                        await self._close_browser()
+                        print("   🔧 Too many consecutive errors - restarting backend...")
+                        await self._close_backend_safe()
                         await asyncio.sleep(5)
-                        await self._init_browser()
+                        await self._init_backend()
                         consecutive_errors = 0
                     await asyncio.sleep(3)  # Back off before retry
                     continue
@@ -948,7 +1348,7 @@ class SmartDataGatherer:
                 self._save_trajectories(pending_trajectories)
             
             self._save_progress()
-            await self._close_browser()
+            await self._close_backend_safe()
             self.indicator.stop()
             
             print("\n" + "=" * 60)
@@ -971,8 +1371,12 @@ class SmartDataGatherer:
 # CLI ENTRYPOINT
 # =============================================================================
 
+_gatherer: Optional["SmartDataGatherer"] = None
+
+
 async def main():
     """Main entrypoint for data gathering."""
+    global _gatherer
     import argparse
     
     parser = argparse.ArgumentParser(description="Smart VLM-guided data gathering")
@@ -985,6 +1389,9 @@ async def main():
     parser.add_argument("--no-gpu", action="store_false", dest="gpu", help="Disable GPU (CPU-only)")
     parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
     parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp URL")
+    parser.add_argument("--vlm-verify", action="store_true", help="Use VLM to verify action success (slow, ~1 call per trajectory)")
+    parser.add_argument("--backend", type=str, default="browser", choices=["browser", "desktop"],
+                        help="Execution backend: browser (Playwright) or desktop (pyautogui/screen)")
     
     args = parser.parse_args()
     
@@ -994,12 +1401,17 @@ async def main():
         vlm_model=args.model,
         vlm_timeout=args.vlm_timeout,
         use_gpu=args.gpu,
+        use_vlm_verification=args.vlm_verify,
         vlm_backend="llamacpp" if args.llamacpp else "ollama",
         vlm_url=args.llamacpp_url if args.llamacpp else "http://localhost:11434",
+        execution_backend=args.backend,
     )
     
-    gatherer = SmartDataGatherer(config)
-    await gatherer.gather_data()
+    _gatherer = SmartDataGatherer(config)
+    try:
+        await _gatherer.gather_data()
+    finally:
+        await _gatherer._close_backend_safe()
 
 
 if __name__ == "__main__":
@@ -1007,6 +1419,11 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n🛑 Interrupted. Progress saved.")
+        if _gatherer:
+            try:
+                asyncio.run(_gatherer._close_backend_safe())
+            except Exception:
+                pass
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
         raise
