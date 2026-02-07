@@ -58,6 +58,7 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
             "model": model,
             "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
             "stream": False,
+            "format": "json",  # FORCE JSON OUTPUT
             "options": {"temperature": 0.1, "num_predict": max_tokens}
         }
     else:  # llama.cpp
