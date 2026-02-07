@@ -126,7 +126,7 @@ class GathererConfig:
     viewport_height: int = 800
     
     # VLM settings
-    vlm_model: str = "qwen2.5-vl:3b"  # Standard small vision model for Ollama
+    vlm_model: str = "qwen3-vl:2b"
     vlm_backend: str = "ollama"
     vlm_url: str = "http://localhost:11434"
     use_gpu: bool = False  # Enable GPU for OCR/Post-processing

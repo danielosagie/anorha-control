@@ -441,8 +441,10 @@ Output JSON array:
             array_match = re.search(r'\[[\s\S]*?\]', response)
             if array_match:
                 return json.loads(array_match.group())
-        except:
-            pass
+            else:
+                print(f"[VLM Debug] No JSON array found in response:\n{response}")
+        except Exception as e:
+            print(f"[VLM Debug] JSON parse error: {e}\nResponse: {response}")
         return []
 
 
