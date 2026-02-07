@@ -129,6 +129,7 @@ class GathererConfig:
     vlm_model: str = "qwen3-vl:2b"
     vlm_backend: str = "ollama"
     vlm_url: str = "http://localhost:11434"
+    use_gpu: bool = False  # Enable GPU for OCR/Post-processing
     
     # Data settings
     data_dir: Path = Path("data/trajectories")
@@ -168,7 +169,8 @@ class SmartDataGatherer:
         self.vlm = VLMSubsystems(
             model=self.config.vlm_model,
             base_url=self.config.vlm_url,
-            backend_type=self.config.vlm_backend
+            backend_type=self.config.vlm_backend,
+            use_ocr_gpu=self.config.use_gpu  # Pass GPU flag to OCR
         )
         
         # Check VLM availability
@@ -191,6 +193,9 @@ class SmartDataGatherer:
         
         # Load existing progress
         self._load_progress()
+        
+        if self.config.use_gpu:
+            print("[DataGatherer] 🚀 GPU acceleration enabled for OCR/Post-processing")
     
     def _check_vlm_connection(self):
         """Check if VLM backend is available and show helpful message if not."""

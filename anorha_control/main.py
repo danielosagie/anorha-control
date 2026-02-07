@@ -315,6 +315,7 @@ def main():
     gather_parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
     gather_parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp server URL")
     gather_parser.add_argument("--difficulty", type=str, default="medium", choices=["easy", "medium", "hard", "expert"])
+    gather_parser.add_argument("--gpu", action="store_true", help="Enable GPU acceleration for OCR/Post-processing")
     
     # Server command (model server management)
     server_parser = subparsers.add_parser("server", help="Manage model servers (llama.cpp/Ollama)")
@@ -363,6 +364,7 @@ async def run_gather(args):
         vlm_backend="llamacpp" if args.llamacpp else "ollama",
         vlm_url=args.llamacpp_url if args.llamacpp else "http://localhost:11434",
         max_difficulty=difficulty_map.get(args.difficulty, Difficulty.MEDIUM),
+        use_gpu=getattr(args, 'gpu', False)
     )
     
     print(f"\nConfiguration:")
