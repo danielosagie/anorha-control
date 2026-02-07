@@ -429,7 +429,9 @@ class ActionPlanner:
                 data_context += f"- {key}: {value}\n"
         
         prompt = f"""Task: {task}{data_context}
+2026-02-07T07:11:34.6527426Z
 
+2026-02-07T07:11:34.6527426Z
 Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
 
 RULES:
@@ -441,7 +443,8 @@ RULES:
 Output JSON array:
 [{{"action": "click|type|scroll", "target": "specific element", "value": "text to type", "reason": "why"}}]"""
         
-        response = self.backend.generate(prompt, screenshot, max_tokens=512)
+        # INCREASED TOKEN LIMIT: VLM needs space to "think" before outputting JSON
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
         return self._parse_steps(response)
     
     def _parse_steps(self, response: str) -> List[Dict[str, Any]]:
