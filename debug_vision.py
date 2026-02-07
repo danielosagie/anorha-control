@@ -49,8 +49,9 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
     payload = {}
     endpoint = ""
     
-    # Use increased token limit (2500) to match the fix
-    max_tokens = 2500
+    # Use extreme limits to accommodate "thinking" models
+    max_tokens = 6000
+    context_window = 16384 
     
     if backend == "ollama":
         endpoint = f"{url}/api/chat"
@@ -59,7 +60,11 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
             "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
             "stream": False,
             "format": "json",  # FORCE JSON OUTPUT
-            "options": {"temperature": 0.1, "num_predict": max_tokens}
+            "options": {
+                "temperature": 0.1, 
+                "num_predict": max_tokens,
+                "num_ctx": context_window  # CRITICAL: Increase context window
+            }
         }
     else:  # llama.cpp
         endpoint = f"{url}/v1/chat/completions"
