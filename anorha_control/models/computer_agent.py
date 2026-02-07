@@ -34,7 +34,7 @@ from .local_llm import LocalLLM, TaskStep
 class AgentConfig:
     """Configuration for ComputerAgent."""
     # VLM settings
-    vlm_model: str = "qwen3-vl:2b"
+    vlm_model: str = "llava"  # Most compatible; Alt: Me7war/Astria
     vlm_backend: str = "ollama"  # "ollama" or "llamacpp"
     vlm_url: str = "http://localhost:11434"
     
@@ -432,7 +432,7 @@ class ComputerAgent:
 from anorha_control.models.computer_agent import ComputerAgent, AgentConfig
 
 config = AgentConfig(
-    vlm_model="qwen3-vl:2b",
+    vlm_model="llava",
     trm_checkpoint="checkpoints/trm_v1.pt",
     verify_actions=True
 )

@@ -73,7 +73,7 @@ class VLMBackend:
     def _check_available(self) -> bool:
         raise NotImplementedError
     
-    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False) -> str:
+    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False, system: str = None) -> str:
         raise NotImplementedError
     
     def _image_to_base64(self, img: Image.Image) -> str:
@@ -88,8 +88,30 @@ class VLMBackend:
 
 
 
+# Models that need -nothink variant (thinking mode breaks JSON output)
+_THINKING_MODELS = ("qwen3-vl", "qwen3-vl:2b", "qwen3-vl:4b", "qwen3-vl:8b")
+
+
+def _resolve_ollama_model(base_url: str, model: str) -> str:
+    """Prefer -nothink variant when base model uses thinking mode."""
+    if not any(m in model for m in ["qwen3-vl", "qwen3-vl:2b"]):
+        return model
+    try:
+        r = requests.get(f"{base_url}/api/tags", timeout=2)
+        if r.status_code != 200:
+            return model
+        tags = [m.get("name", "") for m in r.json().get("models", [])]
+        for t in tags:
+            if "qwen3-vl-nothink" in t:
+                return t
+    except Exception:
+        pass
+    return model
+
+
 class OllamaBackend(VLMBackend):
     """Ollama backend for VLM."""
+    _nothink_warned = False
     
     def _check_available(self) -> bool:
         try:
@@ -98,26 +120,34 @@ class OllamaBackend(VLMBackend):
         except:
             return False
     
-    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False) -> str:
+    def __init__(self, model: str, base_url: str, timeout: float = 120.0):
+        resolved = _resolve_ollama_model(base_url, model)
+        if resolved != model:
+            print(f"[VLM] Using {resolved} (qwen3-vl thinking mode disabled)")
+        super().__init__(resolved, base_url, timeout)
+    
+    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False, system: str = None) -> str:
         if not self.available:
             return ""
         
         img_base64 = self._image_to_base64(image)
         
-        # Adaptive limits for reasoning models
-        # If max_tokens is high (>1000), assume it might be a reasoning model needing more context
-        num_ctx = 8192 if max_tokens > 1000 else 4096
-        
+        num_ctx = 4096
         options = {
             "num_predict": max_tokens, 
             "temperature": 0.1,
             "num_ctx": num_ctx
         }
         
+        messages = [{"role": "user", "content": prompt, "images": [img_base64]}]
+        if system:
+            messages.insert(0, {"role": "system", "content": system})
+        
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt, "images": [img_base64]}],
+            "messages": messages,
             "stream": False,
+            "think": False,
             "options": options
         }
         
@@ -132,19 +162,36 @@ class OllamaBackend(VLMBackend):
             )
             
             if response.status_code != 200:
-                print(f"[Ollama] HTTP {response.status_code}: {response.text}")
+                err = response.text or ""
+                print(f"[Ollama] HTTP {response.status_code}: {err[:200]}")
+                if response.status_code == 500 and ("expert_weights_scale" in err or "error loading model" in err.lower()):
+                    print(f"[Ollama] 💡 Model may need newer Ollama. Try: ollama update && ollama pull llava")
                 return ""
                 
             result = response.json()
             message = result.get("message", {})
             content = message.get("content", "")
             
-            # Log thinking trace if present (debug only)
-            if "thinking" in message and message["thinking"]:
-                print(f"[Ollama Debug] Reasoning trace: {len(message['thinking'])} chars")
+            # Fallback: if content empty but thinking has JSON array, extract it
+            if not content and message.get("thinking"):
+                import re
+                array_match = re.search(r'\[[\s\S]*?\]', message["thinking"])
+                if array_match:
+                    raw = array_match.group()
+                    if raw != "[img]" and len(raw) > 10:  # Skip placeholder tokens
+                        content = raw
+                        print(f"[Ollama Debug] Extracted JSON from thinking fallback")
             
-            if not content:
-                print(f"[Ollama Debug] Empty content in response: {result}")
+            if not content and message.get("thinking"):
+                if not OllamaBackend._nothink_warned:
+                    OllamaBackend._nothink_warned = True
+                    if "nothink" in self.model.lower() or "qwen3-vl" in self.model.lower():
+                        print("\n[VLM] ⚠️ Model returning empty content. Try: ollama pull llava\n")
+                    else:
+                        print("\n[VLM] ⚠️ Model using thinking mode - output empty. Create no-think variant:")
+                        print("   ollama create qwen3-vl-nothink -f Modelfile.qwen3-vl-nothink\n")
+            elif not content:
+                print(f"[Ollama Debug] Empty content in response")
             
             return content
         except Exception as e:
@@ -162,7 +209,7 @@ class LlamaCppBackend(VLMBackend):
         except:
             return False
     
-    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256) -> str:
+    def generate(self, prompt: str, image: Image.Image, max_tokens: int = 256, json_mode: bool = False, system: str = None) -> str:
         if not self.available:
             print(f"[llama.cpp] Server not available at {self.base_url}")
             return ""
@@ -254,14 +301,106 @@ If found, respond with ONLY a JSON object:
 If not found:
 {{"found": false}}
 
-Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.height} pixels."""
+Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.height} pixels. /nothink"""
         
         # Use JSON mode for structural enforcement
         response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
-        return self._parse_response(response)
+        return self._parse_grounding_response(response)
+    
+    def _parse_grounding_response(self, response: str) -> GroundingResult:
+        """Parse VLM response into GroundingResult."""
+        try:
+            import re
+            json_match = re.search(r'\{[^}]+\}', response)
+            if json_match:
+                data = json.loads(json_match.group())
+                if data.get("found"):
+                    return GroundingResult(
+                        found=True,
+                        x=int(data.get("x", 0)),
+                        y=int(data.get("y", 0)),
+                        confidence=0.8,
+                        element_type=data.get("type", "unknown")
+                    )
+        except Exception:
+            pass
+        return GroundingResult(found=False)
 
 
+class TextReader:
+    """
+    Fast text extraction: "What text is on screen?" → list of (text, bbox)
+    
+    Uses EasyOCR for speed, falls back to VLM.
+    Target latency: 100-300ms
+    """
+    
+    def __init__(self, use_gpu: bool = False):
+        self.reader = None
+        if EASYOCR_AVAILABLE:
+            try:
+                self.reader = easyocr.Reader(['en'], gpu=use_gpu)
+                print("[TextReader] Using EasyOCR")
+            except Exception as e:
+                print(f"[TextReader] EasyOCR init failed: {e}")
+    
+    def extract(self, screenshot: Image.Image) -> List[OCRResult]:
+        """
+        Extract all visible text from screenshot.
+        
+        Returns:
+            List of OCRResult with text and bounding boxes
+        """
+        if self.reader is None:
+            return []
+        
+        import numpy as np
+        img_array = np.array(screenshot)
+        
+        try:
+            results = self.reader.readtext(img_array)
+            return [
+                OCRResult(
+                    text=text,
+                    bbox=(int(bbox[0][0]), int(bbox[0][1]), int(bbox[2][0]), int(bbox[2][1])),
+                    confidence=conf
+                )
+                for bbox, text, conf in results
+                if conf > 0.3
+            ]
+        except Exception as e:
+            print(f"[TextReader] OCR error: {e}")
+            return []
+    
+    def find_text(self, target: str, screenshot: Image.Image) -> Optional[Tuple[int, int]]:
+        """
+        Find specific text and return its center coordinates.
+        """
+        results = self.extract(screenshot)
+        target_lower = target.lower()
+        
+        for result in results:
+            if target_lower in result.text.lower():
+                if result.bbox:
+                    x = (result.bbox[0] + result.bbox[2]) // 2
+                    y = (result.bbox[1] + result.bbox[3]) // 2
+                    return (x, y)
+        return None
 
+
+class StateVerifier:
+    """
+    State verification: "Did the action work?" → success/fail
+    
+    Compares before/after screenshots or analyzes current state.
+    Target latency: 200-500ms (only called after actions)
+    """
+    
+    def __init__(self, backend: VLMBackend = None):
+        if backend is None:
+            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=30.0)
+        self.backend = backend
+    
     def verify_action(
         self, 
         action: str, 
@@ -279,7 +418,6 @@ Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.h
         Returns:
             VerificationResult with success status
         """
-        # Simple approach: use after screenshot only
         prompt = f"""I just performed this action: "{action}"
 
 Look at the current screen state and determine:
@@ -287,7 +425,7 @@ Look at the current screen state and determine:
 2. What changed?
 
 Respond with ONLY a JSON object:
-{{"success": true/false, "reason": "brief explanation"}}"""
+{{"success": true/false, "reason": "brief explanation"}} /nothink"""
         
         response = self.backend.generate(prompt, after, max_tokens=2500, json_mode=True)
         return self._parse_response(response)
@@ -303,13 +441,40 @@ Respond with ONLY a JSON object:
         prompt = f"""Check if this screen matches the expected state: "{expected}"
 
 Respond with ONLY a JSON object:
-{{"success": true/false, "reason": "brief explanation"}}"""
+{{"success": true/false, "reason": "brief explanation"}} /nothink"""
         
         response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
         return self._parse_response(response)
+    
+    def _parse_response(self, response: str) -> VerificationResult:
+        try:
+            import re
+            json_match = re.search(r'\{[^}]+\}', response)
+            if json_match:
+                data = json.loads(json_match.group())
+                return VerificationResult(
+                    success=data.get("success", False),
+                    reason=data.get("reason", ""),
+                    changed=True
+                )
+        except Exception:
+            pass
+        return VerificationResult(success=False, reason="Could not parse response")
 
 
-
+class ActionPlanner:
+    """
+    Action planning: Complex task → atomic steps
+    
+    Target latency: 300-800ms
+    """
+    
+    def __init__(self, backend: VLMBackend = None, sample_data: Dict[str, Any] = None):
+        if backend is None:
+            backend = OllamaBackend("qwen2.5-vl:7b", "http://localhost:11434", timeout=60.0)
+        self.backend = backend
+        self.sample_data = sample_data or {}
+    
     def plan(self, task: str, screenshot: Image.Image) -> List[Dict[str, Any]]:
         """
         Create atomic action steps for a task.
@@ -321,40 +486,88 @@ Respond with ONLY a JSON object:
         Returns:
             List of action dicts: [{action, target, value, reason}]
         """
-        data_context = ""
+        data_line = ""
         if self.sample_data:
-            data_context = "\n\nPROVIDED DATA (use these exact values):\n"
-            for key, value in self.sample_data.items():
-                data_context += f"- {key}: {value}\n"
+            data_line = " Data: " + ", ".join(f"{k}={v}" for k, v in self.sample_data.items())
         
-        prompt = f"""Task: {task}{data_context}
+        system = "Output ONLY a JSON array. No reasoning. No thinking. Start with ["
+        prompt = f"""Task: {task}{data_line}
 
-Look at the screenshot and create SPECIFIC, ATOMIC steps for mouse/keyboard control.
-
-RULES:
-1. Each step = ONE click or ONE keyboard action
-2. For typing: Include exact text in "value" field
-3. Use coordinates visible in the current screen
-4. For login: Use PROVIDED credentials exactly (unless screenshot overrides)
-
-Output JSON array (IMMEDIATELY - DO NOT THINK):
-[{{"action": "click|type|scroll", "target": "specific element", "value": "text to type"}}]"""
+Steps = ONE click or ONE type per step. Output JSON only:
+[{{"action":"click","target":"element name","value":""}}] or {{"action":"click","target":"element"}}"""
         
-        # INCREASED TOKEN LIMIT + JSON MODE: Handles reasoning models better
-        response = self.backend.generate(prompt, screenshot, max_tokens=2500, json_mode=True)
+        # 512 tokens: less room for thinking loops, forces faster output
+        response = self.backend.generate(
+            prompt, screenshot, max_tokens=512, json_mode=True,
+            system=system if isinstance(self.backend, OllamaBackend) else None
+        )
         return self._parse_steps(response)
+    
+    def _valid_step(self, s: Any) -> bool:
+        """Filter out null/invalid steps from garbage JSON."""
+        if s is None:
+            return False
+        if isinstance(s, dict):
+            return "action" in s or "target" in s
+        return hasattr(s, "action") and hasattr(s, "target")
     
     def _parse_steps(self, response: str) -> List[Dict[str, Any]]:
         try:
-            import re
-            # Find JSON array in response
-            array_match = re.search(r'\[[\s\S]*?\]', response)
-            if array_match:
-                return json.loads(array_match.group())
-            else:
-                print(f"[VLM Debug] No JSON array found in response:\n{response}")
+            stripped = response.strip()
+            # Try full parse first (handles {"steps": [...]} from Astria)
+            decoder = json.JSONDecoder()
+            obj, _ = decoder.raw_decode(stripped)
+            if isinstance(obj, list):
+                return [s for s in obj if self._valid_step(s)]
+            if isinstance(obj, dict):
+                if "steps" in obj:
+                    steps = obj["steps"]
+                    return [s for s in (steps if isinstance(steps, list) else []) if self._valid_step(s)]
+                if "action" in obj:
+                    return [obj]
+            # Fallback: find array with bracket matching (avoids ] inside strings)
+            return self._extract_steps_fallback(response)
+        except json.JSONDecodeError:
+            return self._extract_steps_fallback(response)
         except Exception as e:
-            print(f"[VLM Debug] JSON parse error: {e}\nResponse: {response}")
+            print(f"[VLM Debug] JSON parse error: {e}\nResponse: {response[:300]}")
+        return []
+    
+    def _extract_steps_fallback(self, response: str) -> List[Dict[str, Any]]:
+        """Extract steps when full parse fails (handles ] inside strings)."""
+        # Try {"steps": [...]} - use raw_decode on the part after "steps":
+        idx = response.find('"steps"')
+        if idx == -1:
+            idx = response.find("'steps'")
+        if idx >= 0:
+            bracket = response.find("[", idx)
+            if bracket >= 0:
+                try:
+                    decoder = json.JSONDecoder()
+                    steps, _ = decoder.raw_decode(response[bracket:])
+                    return [s for s in (steps if isinstance(steps, list) else []) if self._valid_step(s)]
+                except json.JSONDecodeError:
+                    pass
+        # Try top-level array
+        bracket = response.find("[")
+        if bracket >= 0:
+            try:
+                decoder = json.JSONDecoder()
+                steps, _ = decoder.raw_decode(response[bracket:])
+                return [s for s in (steps if isinstance(steps, list) else []) if self._valid_step(s)]
+            except json.JSONDecodeError:
+                pass
+        # Single object
+        brace = response.find("{")
+        if brace >= 0:
+            try:
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(response[brace:])
+                if isinstance(obj, dict) and "action" in obj:
+                    return [obj]
+            except json.JSONDecodeError:
+                pass
+        print(f"[VLM Debug] No JSON array or object found in response:\n{response[:300]}")
         return []
 
 
@@ -384,16 +597,17 @@ class VLMSubsystems:
     
     def __init__(
         self,
-        model: str = "qwen3-vl:2b",
+        model: str = "llava",  # Most compatible. Alt: Me7war/Astria, youtu/youtu-vl
         base_url: str = "http://localhost:11434",
         backend_type: str = "ollama",  # "ollama" or "llamacpp"
         use_ocr_gpu: bool = False,
+        timeout: float = 600.0,  # CPU inference can take 10+ min for 5k tokens
     ):
         # Create backend
         if backend_type == "llamacpp":
-            backend = LlamaCppBackend(model, base_url)
+            backend = LlamaCppBackend(model, base_url, timeout=timeout)
         else:
-            backend = OllamaBackend(model, base_url)
+            backend = OllamaBackend(model, base_url, timeout=timeout)
         
         # Initialize subsystems
         self.grounder = ElementGrounder(backend)

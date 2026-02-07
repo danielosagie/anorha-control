@@ -60,6 +60,7 @@ Output JSON array (IMMEDIATELY - DO NOT THINK):
             "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
             "stream": True,  # STREAMING ON: See output immediately
             "format": "json",  # FORCE JSON OUTPUT
+            "think": False,  # Disable thinking so qwen3-vl outputs to content, not thinking field
             "options": {
                 "temperature": 0.1, 
                 "num_predict": max_tokens,

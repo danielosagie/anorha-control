@@ -1,0 +1,14 @@
+# qwen3-vl without thinking mode - outputs directly to content
+# Create with: ollama create qwen3-vl-nothink -f Modelfile.qwen3-vl-nothink
+#
+# qwen3-vl:2b ignores API think:false; SYSTEM /nothink fixes it.
+# Use this model for Anorha VLM (planning, grounding) - fast, reliable JSON output.
+
+FROM qwen3-vl:2b
+
+# Disable extended thinking - model outputs directly to content
+SYSTEM """Always output your response directly. Do not use extended thinking. For JSON tasks, output only the JSON array or object. /nothink"""
+
+# Tighter for structured output
+PARAMETER temperature 0.1
+PARAMETER num_ctx 4096

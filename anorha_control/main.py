@@ -313,7 +313,7 @@ def main():
     gather_parser = subparsers.add_parser("gather", help="VLM-guided data gathering for TRM training")
     gather_parser.add_argument("--target", type=int, default=5000, help="Target trajectories to collect")
     gather_parser.add_argument("--visible", action="store_true", help="Show browser window")
-    gather_parser.add_argument("--model", type=str, default="qwen3-vl:2b", help="VLM model")
+    gather_parser.add_argument("--model", type=str, default="llava", help="VLM model (llava, Me7war/Astria)")
     gather_parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
     gather_parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp server URL")
     gather_parser.add_argument("--difficulty", type=str, default="medium", choices=["easy", "medium", "hard", "expert"])

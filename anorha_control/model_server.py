@@ -68,10 +68,15 @@ MODELS = {
     },
 }
 
-# Aliases
+# Aliases (Ollama-only)
 MODELS["qwen-vl"] = MODELS["qwen3-vl:2b"]
 MODELS["qwen-vl-2b"] = MODELS["qwen3-vl:2b"]
 MODELS["vlm"] = MODELS["qwen3-vl:2b"]
+MODELS["astria"] = {"ollama": "Me7war/Astria", "type": "vlm"}
+MODELS["youtu-vl"] = {"ollama": "youtu/youtu-vl", "type": "vlm"}
+# Smaller VLMs: moondream (1.4B, 1.7GB), llava-phi3 (3.8B, 2.9GB) - often better JSON than llava
+MODELS["moondream"] = {"ollama": "moondream", "type": "vlm"}
+MODELS["llava-phi3"] = {"ollama": "llava-phi3", "type": "vlm"}
 
 
 # =============================================================================
