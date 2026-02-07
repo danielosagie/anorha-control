@@ -237,7 +237,7 @@ If not found:
 
 Be precise with pixel coordinates. The image is {screenshot.width}x{screenshot.height} pixels."""
         
-        response = self.backend.generate(prompt, screenshot, max_tokens=100)
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
         return self._parse_response(response)
     
     def _parse_response(self, response: str) -> GroundingResult:
