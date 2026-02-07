@@ -188,8 +188,13 @@ class SmartDataGatherer:
         self._paused = False
         self._killed = False
         
-        # Overlay for hotkeys
-        self.indicator = get_indicator(on_kill=self._on_kill, on_pause=self._on_pause)
+        # Overlay for hotkeys - configured for viewport size
+        self.indicator = get_indicator(
+            on_kill=self._on_kill, 
+            on_pause=self._on_pause,
+            width=self.config.viewport_width,
+            height=self.config.viewport_height
+        )
         
         # Load existing progress
         self._load_progress()
@@ -292,6 +297,9 @@ class SmartDataGatherer:
             args=[
                 "--disable-blink-features=AutomationControlled",
                 f"--window-size={self.config.viewport_width},{self.config.viewport_height}",
+                "--window-position=0,0",  # Keep it top-left
+                "--no-default-browser-check",
+                "--no-first-run",
             ]
         )
         self._context = await self._browser.new_context(

@@ -85,28 +85,33 @@ class CursorIndicator:
 
 class ScreenBorder:
     """
-    Creates a green border around the screen using a shell script approach.
-    More reliable than AppKit for non-main-thread usage.
+    Creates a green border around the screen or specific window area.
     """
     
-    def __init__(self, color: str = ANORHA_GREEN, width: int = 8):
+    def __init__(self, color: str = ANORHA_GREEN, width: int = 8, w: int = None, h: int = None):
         self.color = color
         self.width = width
+        self.w = w
+        self.h = h
         self._process: Optional[subprocess.Popen] = None
         self._script_path = os.path.join(os.path.expanduser("~"), "anorha_border.py")
     
     def _create_border_script(self):
         """Create a Python script for the border overlay."""
+        # Use provided dimensions or fallback to screen size
+        size_logic = f"""
+    root = tk.Tk()
+    width = {self.w} if {self.w} else root.winfo_screenwidth()
+    height = {self.h} if {self.h} else root.winfo_screenheight()
+    root.destroy()
+"""
         script = f'''#!/usr/bin/env python3
 import tkinter as tk
 import sys
 
 def create_border():
-    # Get screen dimensions
-    root = tk.Tk()
-    width = root.winfo_screenwidth()
-    height = root.winfo_screenheight()
-    root.destroy()
+    # Get dimensions
+    {size_logic}
     
     # Create borderless window for each edge
     borders = []
@@ -352,9 +357,9 @@ class ControlIndicator:
         return self._paused
 
 
-def get_indicator(on_kill: Callable = None, on_pause: Callable = None) -> ControlIndicator:
+def get_indicator(on_kill: Callable = None, on_pause: Callable = None, width: int = None, height: int = None) -> ControlIndicator:
     """Get the control indicator."""
-    return ControlIndicator(on_kill, on_pause)
+    return ControlIndicator(on_kill, on_pause, width, height)
 
 
 
