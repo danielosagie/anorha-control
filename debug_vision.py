@@ -5,7 +5,7 @@ import io
 import argparse
 from PIL import Image
 
-def test_vision(backend="ollama", url="http://localhost:11434", model="qwen2.5-vl:3b"):
+def test_vision(backend="ollama", url="http://localhost:11434", model="qwen3-vl:2b"):
     print(f"\n🔍 Testing VLM Planning Capabilities")
     print(f"   Backend: {backend}")
     print(f"   URL: {url}")
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--llamacpp", action="store_true")
     parser.add_argument("--url", type=str)
-    parser.add_argument("--model", type=str, default="qwen2.5-vl:3b")
+    parser.add_argument("--model", type=str, default="qwen3-vl:2b")
     args = parser.parse_args()
     
     backend = "llamacpp" if args.llamacpp else "ollama"

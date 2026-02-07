@@ -32,8 +32,8 @@ from ..utils.overlay import get_indicator
 class SandboxConfig:
     """Configuration for sandbox exploration."""
     headless: bool = False  # Show browser window
-    viewport_width: int = 1280
-    viewport_height: int = 800
+    viewport_width: int = 1920
+    viewport_height: int = 1080
     epsilon: float = 0.2  # Lower epsilon - rely more on curriculum
     max_episode_steps: int = 20
     action_delay: float = 0.8

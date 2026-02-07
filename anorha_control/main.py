@@ -11,7 +11,9 @@ Usage:
 """
 import asyncio
 import argparse
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import torch
 
@@ -315,7 +317,9 @@ def main():
     gather_parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
     gather_parser.add_argument("--llamacpp-url", type=str, default="http://localhost:8080", help="llama.cpp server URL")
     gather_parser.add_argument("--difficulty", type=str, default="medium", choices=["easy", "medium", "hard", "expert"])
-    gather_parser.add_argument("--gpu", action="store_true", help="Enable GPU acceleration for OCR/Post-processing")
+    gather_parser.add_argument("--gpu", action="store_true", help="Enable GPU acceleration for OCR/Post-processing and VLM")
+    gather_parser.add_argument("--start-server", action="store_true", help="Start llama.cpp server with GPU if not running (--llamacpp only)")
+    gather_parser.add_argument("--fast-vlm", action="store_true", help="Resize images for VLM (768x480) - speeds up when vision encoder is on CPU")
     
     # Server command (model server management)
     server_parser = subparsers.add_parser("server", help="Manage model servers (llama.cpp/Ollama)")
@@ -339,6 +343,12 @@ def main():
         sys.exit(model_server.main())
 
 
+def _port_from_url(url: str) -> int:
+    """Extract port from URL, default 8080."""
+    parsed = urlparse(url)
+    return parsed.port or 8080
+
+
 async def run_gather(args):
     """Run VLM-guided data gathering for TRM training."""
     from anorha_control.exploration import SmartDataGatherer, GathererConfig
@@ -348,6 +358,45 @@ async def run_gather(args):
     print("🤖 ANORHA-CONTROL: Smart Data Gatherer")
     print("   VLM-guided exploration for TRM training data")
     print("=" * 60)
+    
+    # Start llama.cpp server with GPU when requested and not running
+    if args.llamacpp and getattr(args, 'start_server', False):
+        import requests
+        port = _port_from_url(args.llamacpp_url)
+        url = args.llamacpp_url.rstrip("/")
+        try:
+            r = requests.get(f"{url}/health", timeout=2)
+            if r.status_code == 200:
+                print(f"[VLM] Server already running at {url}")
+                if getattr(args, 'gpu', False):
+                    print(f"   💡 If VLM is slow (~30s/image), restart with GPU:")
+                    print(f"      uv run python -m anorha_control.model_server start {args.model} --port {port}")
+            else:
+                raise requests.RequestException("not 200")
+        except Exception:
+            print(f"[VLM] Starting llama.cpp server with GPU on port {port}...")
+            from anorha_control.model_server import ServerManager
+            manager = ServerManager()
+            if manager.start(
+                model_key=args.model,
+                port=port,
+                gpu_layers=99,
+                prefer_ollama=False,
+            ):
+                print(f"   Waiting for server to be ready...")
+                for _ in range(15):
+                    await asyncio.sleep(2)
+                    try:
+                        if requests.get(f"{url}/health", timeout=2).status_code == 200:
+                            print(f"   ✅ Server ready")
+                            break
+                    except Exception:
+                        pass
+                else:
+                    print(f"   ⚠️ Server may still be loading. Continue with gather.")
+            else:
+                print(f"   ⚠️ Could not start server. Run manually:")
+                print(f"      uv run python -m anorha_control.model_server start {args.model} --port {port}")
     
     # Map difficulty string to enum
     difficulty_map = {
@@ -364,7 +413,8 @@ async def run_gather(args):
         vlm_backend="llamacpp" if args.llamacpp else "ollama",
         vlm_url=args.llamacpp_url if args.llamacpp else "http://localhost:11434",
         max_difficulty=difficulty_map.get(args.difficulty, Difficulty.MEDIUM),
-        use_gpu=getattr(args, 'gpu', False)
+        use_gpu=getattr(args, 'gpu', False),
+        vlm_image_max_size=(768, 480) if getattr(args, 'fast_vlm', False) else None,
     )
     
     print(f"\nConfiguration:")
@@ -372,6 +422,8 @@ async def run_gather(args):
     print(f"   VLM: {config.vlm_model} via {config.vlm_backend}")
     print(f"   Difficulty: {args.difficulty}")
     print(f"   Data dir: {config.data_dir}")
+    if config.vlm_image_max_size:
+        print(f"   Fast VLM: images resized to {config.vlm_image_max_size} (faster when vision on CPU)")
     
     gatherer = SmartDataGatherer(config)
     await gatherer.gather_data()

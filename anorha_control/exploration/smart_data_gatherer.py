@@ -130,6 +130,9 @@ class GathererConfig:
     vlm_backend: str = "ollama"
     vlm_url: str = "http://localhost:11434"
     use_gpu: bool = False  # Enable GPU for OCR/Post-processing
+    # Resize images before sending to VLM (reduces tokens when vision encoder is on CPU)
+    # Set to (768, 480) or (640, 400) to speed up ~3-4x. None = use full resolution.
+    vlm_image_max_size: Optional[Tuple[int, int]] = None
     
     # Data settings
     data_dir: Path = Path("data/trajectories")
@@ -202,6 +205,33 @@ class SmartDataGatherer:
         if self.config.use_gpu:
             print("[DataGatherer] 🚀 GPU acceleration enabled for OCR/Post-processing")
     
+    def _port_from_url(self, url: str) -> int:
+        """Extract port from URL, default 8080."""
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return parsed.port or 8080
+    
+    def _resize_for_vlm(
+        self, img: Image.Image
+    ) -> Tuple[Image.Image, float, float]:
+        """
+        Resize image for VLM to reduce tokens when vision encoder is on CPU.
+        Returns (resized_img, scale_x, scale_y) for converting coords back.
+        """
+        max_size = self.config.vlm_image_max_size
+        if not max_size:
+            return img, 1.0, 1.0
+        w, h = img.size
+        mx, my = max_size
+        if w <= mx and h <= my:
+            return img, 1.0, 1.0
+        ratio = min(mx / w, my / h)
+        new_w, new_h = int(w * ratio), int(h * ratio)
+        resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        scale_x = w / new_w
+        scale_y = h / new_h
+        return resized, scale_x, scale_y
+    
     def _check_vlm_connection(self):
         """Check if VLM backend is available and show helpful message if not."""
         import requests
@@ -214,12 +244,18 @@ class SmartDataGatherer:
                 r = requests.get(f"{url}/health", timeout=2)
                 if r.status_code == 200:
                     print(f"[VLM] ✅ llama.cpp server running at {url}")
+                    if self.config.use_gpu:
+                        port = self._port_from_url(url)
+                        print(f"   💡 If VLM is slow (~30s/image), restart with GPU:")
+                        print(f"      uv run python -m anorha_control.model_server start {self.config.vlm_model} --port {port}")
                     return True
             except:
                 pass
             
             print(f"[VLM] ⚠️ llama.cpp server not responding at {url}")
-            print(f"      Start it with: llama-server.exe -m <model.gguf> --port 8080 -ngl 99")
+            port = self._port_from_url(url)
+            print(f"      Start with GPU: uv run python -m anorha_control.model_server start {self.config.vlm_model} --port {port}")
+            print(f"      Or use --start-server with gather to auto-start")
             print(f"      Or use Ollama: remove --llamacpp flag")
             
         else:  # ollama
@@ -460,9 +496,10 @@ class SmartDataGatherer:
         
         # Take screenshot and plan with VLM
         screenshot = await self._screenshot()
+        vlm_img, scale_x, scale_y = self._resize_for_vlm(screenshot)
         sample_data = task.sample_data or {}
         
-        steps = self.vlm.plan(task.objective, screenshot, sample_data)
+        steps = self.vlm.plan(task.objective, vlm_img, sample_data)
         
         if not steps:
             print("   ⚠️ VLM returned no steps, trying fallback")
@@ -487,9 +524,10 @@ class SmartDataGatherer:
             
             # Get fresh screenshot
             screenshot = await self._screenshot()
+            vlm_img, scale_x, scale_y = self._resize_for_vlm(screenshot)
             
             # Ground the element
-            grounding = self.vlm.locate(target, screenshot)
+            grounding = self.vlm.locate(target, vlm_img)
             
             if not grounding.found:
                 print(f"      ❌ Element not found")
@@ -497,9 +535,13 @@ class SmartDataGatherer:
                 self.progress.total_trajectories += 1
                 continue
             
+            # Scale coordinates back to viewport (if we resized for VLM)
+            target_x = int(grounding.x * scale_x)
+            target_y = int(grounding.y * scale_y)
+            
             # Execute and record
             traj = await self._execute_and_record(
-                grounding.x, grounding.y,
+                target_x, target_y,
                 action_type=action,
                 text=value if action == "type" else None
             )
@@ -509,7 +551,7 @@ class SmartDataGatherer:
                 
                 if traj.success:
                     self.progress.successful_trajectories += 1
-                    print(f"      ✅ Success ({grounding.x}, {grounding.y})")
+                    print(f"      ✅ Success ({target_x}, {target_y})")
                 else:
                     self.progress.failed_trajectories += 1
                     print(f"      ⚠️ No visible change")
