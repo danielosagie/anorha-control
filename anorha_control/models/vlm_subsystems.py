@@ -362,7 +362,7 @@ Look at the current screen state and determine:
 Respond with ONLY a JSON object:
 {{"success": true/false, "reason": "brief explanation"}}"""
         
-        response = self.backend.generate(prompt, after, max_tokens=100)
+        response = self.backend.generate(prompt, after, max_tokens=2500)
         return self._parse_response(response)
     
     def check_state(self, expected: str, screenshot: Image.Image) -> VerificationResult:
@@ -378,7 +378,7 @@ Respond with ONLY a JSON object:
 Respond with ONLY a JSON object:
 {{"success": true/false, "reason": "brief explanation"}}"""
         
-        response = self.backend.generate(prompt, screenshot, max_tokens=100)
+        response = self.backend.generate(prompt, screenshot, max_tokens=2500)
         return self._parse_response(response)
     
     def _parse_response(self, response: str) -> VerificationResult:
