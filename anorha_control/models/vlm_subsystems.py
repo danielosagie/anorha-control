@@ -143,6 +143,7 @@ class LlamaCppBackend(VLMBackend):
         
         # llama.cpp uses OpenAI-compatible API with multimodal content
         payload = {
+            "model": self.model,  # Explicitly send model name (required by some server versions)
             "messages": [{
                 "role": "user",
                 "content": [
