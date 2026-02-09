@@ -94,20 +94,33 @@ class TrajectoryDataset(Dataset):
     def _load_data(self, data_path: str):
         """Load and preprocess trajectory data."""
         path = Path(data_path)
-        
+        trajectories = []
         if path.is_file():
             with open(path) as f:
-                trajectories = json.load(f)
+                data = json.load(f)
+            if isinstance(data, list):
+                trajectories = data
+            elif isinstance(data, dict) and "target" in data and "trajectory" in data:
+                trajectories = [data]
+            elif isinstance(data, dict) and "trajectories" in data:
+                trajectories = data["trajectories"]
         elif path.is_dir():
-            trajectories = []
             for file in path.glob("*.json"):
                 with open(file) as f:
-                    trajectories.extend(json.load(f))
+                    data = json.load(f)
+                if isinstance(data, list):
+                    trajectories.extend(data)
+                elif isinstance(data, dict) and "target" in data and "trajectory" in data:
+                    trajectories.append(data)
+                elif isinstance(data, dict) and "trajectories" in data:
+                    trajectories.extend(data["trajectories"])
         else:
             raise ValueError(f"Data path not found: {data_path}")
-        
+
         # Convert trajectories to training samples
         for traj in trajectories:
+            if not isinstance(traj, dict):
+                continue
             success = traj.get("success", False)
             if not success and not self.config.include_failed:
                 continue

@@ -1,79 +1,790 @@
-LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] 💭 Thinking mode detected (1129 chars)
-[LocalLLM] ⏱️ 16.1s | Response: 1129 chars
-   📝 Plan: ['username field', 'username field', 'password field', 'password field', 'login button']...
+danie@Br MINGW64 /d/danie/Documents/Code Projects/anorha-control (main)
+$ uv run python -m anorha_control.exploration.smart_data_gatherer --save-screenshots --grounding uground
+<frozen runpy>:128: RuntimeWarning: 'anorha_control.exploration.smart_data_gatherer' found in sys.modules after import of package 'anorha_control.exploration', but prior to execution of 'anorha_control.exploration.smart_data_gatherer'; this may result in unpredictable behaviour
+[TextReader] Using EasyOCR (gpu=True)
+[VLMSubsystems] Initialized with ollama backend (moondream)
+[VLM] ✅ Ollama running at http://localhost:11434
+[DataGatherer] UGround grounding enabled (GUI-specialized) [device=cuda:0]
+[DataGatherer] Pre-loading UGround (~30s)...
+The image processor of type `Qwen2VLImageProcessor` is now loaded as a fast processor by default, even if the model checkpoint was saved with a slow processor. This is a breaking 
+change and may produce slightly different outputs. To continue using the slow processor, instantiate this class with `use_fast=False`.
+Loading weights: 100%|████████████████████████████████████████████████████████████████| 729/729 [00:16<00:00, 45.18it/s, Materializing param=model.visual.patch_embed.proj.weight]
+[UGround] Loaded osunlp/UGround-V1-2B (4bit=False) on cuda:0
+[DataGatherer] UGround ready.
+[DataGatherer] Loaded progress: 1359 successful trajectories
+[DataGatherer] 🚀 GPU acceleration enabled (CUDA: NVIDIA GeForce GTX 1650 SUPER)
 
-   Step 1/7: click username field
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 19.3s | Response: 35 chars
-[LocalLLM] locate_target raw: {"x": 120, "y": 310, "found": true}
-[LocalLLM] locate_target: Found at (153, 248) [scaled from 120, 310]
-   🎯 VLM: (153, 248) | TRM: (907, 507) | dist=797px → VLM override
-   🖱️ Click @ (153, 248)
-   ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)
+============================================================
+🤖 SMART DATA GATHERER: VLM-Guided Exploration
+   Press Cmd+Shift+Escape to stop | Cmd+Shift+P to pause
+   Self-healing: browser restarts on crash, progress saved every episode
+============================================================
 
-   Step 2/7: type username field
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] 💭 Thinking mode detected (1970 chars)
-[LocalLLM] ⏱️ 11.8s | Response: 1970 chars
-[LocalLLM] locate_target raw: So, let's look at the image. The task is to find the "username field". First, check the list of examples. There's a section called "Basic Auth (user and pass: admin)". Wait, but the question is about
-[LocalLLM] locate_target: No JSON in response
-   📍 Element: (209, 539) | TRM: (930, 525) | dist=721px [element]
-   ⌨️ Type 'hello world' @ (209, 539)
-   ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)
+📊 Target: 5000 successful trajectories
+   Current: 1359
+   Remaining: 3641
+   Grounding timeout: 30s (fail fast)
+[Border] Green border activated (#8cc63f)
+[KillSwitch] Listening for <ctrl>+<shift>+<esc>
+[PauseSwitch] Listening for <ctrl>+<shift>+p
 
-   Step 3/7: click password field
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 12.9s | Response: 32 chars
-[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
-[LocalLLM] locate_target: Element not found by VLM
-   ⚠️ No ground truth - using trm: (764, 621)
-   🖱️ Click @ (764, 621)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
-   ⚠️ 3 consecutive failures - ending episode
-[Sandbox] Navigated to: https://testsheepnz.github.io/BasicCalculator.html
-
-📍 Episode 6
+📍 Episode 3091
    Site: https://testsheepnz.github.io/BasicCalculator.html
    Task: Solve: (25 * 4) - 17 = ?
-   🧠 VLM Planning...
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] 💭 Thinking mode detected (943 chars)
-[LocalLLM] ⏱️ 16.1s | Response: 943 chars
-   📝 Plan: ['Solve: (25 * 4) - 17 = ?']...
+   📋 Playwright calculator: (25 * 4) - 17 → 4 steps
+   📋 Planned 4 steps [playwright] (420ms)
+      → 1) type 'First number' → '25...'
+      → 2) click 'Multiply'
+      → 3) type 'Second number' → '4...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '25...'
+      ✅ Success (464, 399) (787ms)
+   Step 2: click 'Multiply'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '4...'
+      ✅ Success (464, 431) (618ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (458ms)
+   ⏱️ Episode: 7.2s
 
-   Step 1/5: click Solve: (25 * 4) - 17 = ?
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 13.8s | Response: 32 chars
-[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
-[LocalLLM] locate_target: Element not found by VLM
-   ⚠️ No ground truth - using trm: (638, 412)
-   🖱️ Click @ (638, 412)
-   ✗ reward=0.30 (dist_r=0.00 vis_r=0.30)
+   📈 Progress: 27.2% (1359/5000)
+      Success rate: 29.1% | Speed: 120809/h (overall) | ETA: 0.0h
 
-   Step 2/5: Solve: (25 * 4) - 17 = ?
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 4.7s | Response: 32 chars
-[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
-[LocalLLM] locate_target: Element not found by VLM
-   ⚠️ No ground truth - using random: (418, 1326)
-   🖱️ Click @ (418, 1326)
-   ✗ reward=0.00 (dist_r=0.00 vis_r=0.00)
+📍 Episode 3092
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   📋 Playwright calculator: 42 + 13 → 4 steps
+   📋 Planned 4 steps [playwright] (329ms)
+      → 1) type 'First number' → '42...'
+      → 2) click 'Add'
+      → 3) type 'Second number' → '13...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '42...'
+      ✅ Success (464, 399) (632ms)
+   Step 2: click 'Add'
+      ⚠️ No visible change (2.2s)
+   Step 3: type 'Second number' → '13...'
+      ✅ Success (464, 431) (643ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (463ms)
+   ⏱️ Episode: 6.6s
 
-   Step 3/5: Solve: (25 * 4) - 17 = ?
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 8.9s | Response: 32 chars
-[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
-[LocalLLM] locate_target: Element not found by VLM
-   📍 Element: (1019, 51) | TRM: (1131, 230) | dist=211px [element]
-   🖱️ Click @ (1019, 51)
-   ✓ reward=0.24 (dist_r=0.00 vis_r=0.80)
+   📈 Progress: 27.2% (1359/5000)
+      Success rate: 29.1% | Speed: 101621/h (overall) | ETA: 0.0h
 
-   Step 4/5: Solve: (25 * 4) - 17 = ?
-[LocalLLM] Calling qwen3-vl:2b via /chat (images=1)...
-[LocalLLM] ⏱️ 13.5s | Response: 32 chars
-[LocalLLM] locate_target raw: {"x": 0, "y": 0, "found": false}
-[LocalLLM] locate_target: Element not found by VLM
-   📍 Element: (492, 931) | TRM: (944, 461) | dist=652px [element]
-   🖱️ Click @ (492, 931)
-   ✗ reward=0.09 (dist_r=0.00 vis_r=0.30)
+📍 Episode 3093
+   Site: https://humanbenchmark.com/tests/aim
+   Task: Click 30 targets as fast as possible
+[VLM Debug] No JSON array or object found in response:
+{"action":["Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "Click to start", "
+   📋 Planned 1 steps [vlm] (1m 21.6s)
+      → 1) Click to start 'Click to start'
+   Step 1: click 'Click to start'
+The following generation flags are not valid and may be ignored: ['temperature']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+      ⚠️ No visible change (1m 7.4s)
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Start'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: click 'Start'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 252.6s
+
+   📈 Progress: 27.2% (1359/5000)
+      Success rate: 29.1% | Speed: 16215/h (overall) | ETA: 0.2h
+
+📍 Episode 3094
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+   📋 Planned 1 steps [vlm] (11.0s)
+      → 1) type 'Username' → 'tomsmith...'
+   Step 1: type 'Username' → 'tomsmith...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.5s
+
+   📈 Progress: 27.2% (1359/5000)
+      Success rate: 29.1% | Speed: 12044/h (overall) | ETA: 0.3h
+
+📍 Episode 3095
+   Site: https://www.booking.com/
+   Task: Search for hotels in Barcelona, Spain for 2 adults
+   📋 Playwright search: type 'hotels in Barcelona...' in search box
+   📋 Planned 2 steps [playwright] (476ms)
+      → 1) type 'search' → 'hotels in Barcelona...'
+      → 2) click 'search submit'
+   Step 1: type 'search' → 'hotels in Barcelona...'
+      ✅ Success (86, 596) (1.0s)
+   Step 2: click 'search submit'
+      ⚠️ No visible change (4.9s)
+   📋 Planned 1 steps [vlm] (11.2s)
+      → 1) type 'Search' → 'Tokyo...'
+   🔄 Re-planning: task has more to do | Done so far: 2 steps
+   Step 3: type 'Search' → 'Tokyo...'
+      ⚠️ No visible change (42.1s)
+   📋 Planned 1 steps [vlm] (11.0s)
+      → 1) type 'Search' → ' query...'
+   🔄 Re-planning: task has more to do | Done so far: 3 steps
+   Step 4: type 'Search' → ' query...'
+      ✅ Success (1131, 549) (6.3s)
+   ⏱️ Episode: 80.3s
+
+   📈 Progress: 27.2% (1360/5000)
+      Success rate: 29.1% | Speed: 10044/h (overall) | ETA: 0.4h
+
+📍 Episode 3096
+   Site: https://en.wikipedia.org/wiki/Main_Page
+   Task: Navigate to the article about 'Machine Learning' by clicking links
+   📋 Playwright Wikipedia search: 'machine learning' + Enter
+   📋 Planned 3 steps [playwright] (67ms)
+      → 1) type 'Search Wikipedia' → 'machine learning...'
+      → 2) press_enter 'Search Wikipedia'
+      → 3) click 'machine learning'
+   Step 1: type 'Search Wikipedia' → 'machine learning...'
+      ✅ Success (493, 33) (732ms)
+   Step 2: press_enter 'Search Wikipedia'
+      ✅ Success (493, 33) (895ms)
+   Step 3: click 'machine learning'
+      ❌ Element not found (target: 'machine learning') (59.0s)
+   ⏱️ Episode: 63.0s
+
+   📈 Progress: 27.2% (1360/5000)
+      Success rate: 29.1% | Speed: 8878/h (overall) | ETA: 0.4h
+
+📍 Episode 3097
+   Site: https://testsmith-io.github.io/locator-game/
+   Task: Find and click the correct element based on hints
+   📋 Planned 1 steps [vlm] (10.8s)
+      → 1) Click to start 'Click to start'
+   Step 1: click 'Click to start'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.2s
+
+   📈 Progress: 27.2% (1360/5000)
+      Success rate: 29.1% | Speed: 7467/h (overall) | ETA: 0.5h
+
+📍 Episode 3098
+   Site: https://www.booking.com/
+   Task: Search for hotels in Barcelona, Spain for 2 adults
+   📋 Playwright search: type 'hotels in Barcelona...' in search box
+   📋 Planned 2 steps [playwright] (122ms)
+      → 1) type 'search' → 'hotels in Barcelona...'
+      → 2) click 'search submit'
+   Step 1: type 'search' → 'hotels in Barcelona...'
+      ✅ Success (86, 596) (748ms)
+   Step 2: click 'search submit'
+      ⚠️ No visible change (4.2s)
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) type 'Search' → 'Tokyo...'
+   🔄 Re-planning: task has more to do | Done so far: 2 steps
+   Step 3: type 'Search' → 'Tokyo...'
+      ✅ Success (1131, 549) (6.4s)
+   ⏱️ Episode: 25.5s
+
+   📈 Progress: 27.2% (1361/5000)
+      Success rate: 29.1% | Speed: 7182/h (overall) | ETA: 0.5h
+
+📍 Episode 3099
+   Site: http://uitestingplayground.com/textinput
+   Task: Type a new button name and click the button to change its text
+   📋 Playwright generic input: type 'test' in first input
+   📋 Planned 1 steps [playwright] (122ms)
+      → 1) type 'input' → 'test...'
+   Step 1: type 'input' → 'test...'
+      ✅ Success (640, 400) (628ms)
+   📋 Planned 1 steps [vlm] (10.7s)
+      → 1) type 'type'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: type 'type'
+      ❌ Element not found (target: 'type') (33.5s)
+   ⏱️ Episode: 49.9s
+
+   📈 Progress: 27.2% (1361/5000)
+      Success rate: 29.1% | Speed: 6684/h (overall) | ETA: 0.5h
+
+📍 Episode 3100
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+   📋 Planned 1 steps [vlm] (11.0s)
+      → 1) type 'Username' → 'tomsmith...'
+   Step 1: type 'Username' → 'tomsmith...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.3s
+
+   📈 Progress: 27.2% (1361/5000)
+      Success rate: 29.1% | Speed: 5851/h (overall) | ETA: 0.6h
+
+📍 Episode 3101
+   Site: https://www.google.com/travel/flights
+   Task: Search for round-trip flights from San Francisco to Tokyo for next month
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) type 'Search' → 'Tokyo...'
+   Step 1: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.5s
+
+   📈 Progress: 27.2% (1361/5000)
+      Success rate: 29.1% | Speed: 8/h (last 11 ep) | ETA: 455.6h
+
+📍 Episode 3102
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   📋 Playwright calculator: 42 + 13 → 4 steps
+   📋 Planned 4 steps [playwright] (343ms)
+      → 1) type 'First number' → '42...'
+      → 2) click 'Add'
+      → 3) type 'Second number' → '13...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '42...'
+      ✅ Success (464, 399) (645ms)
+   Step 2: click 'Add'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '13...'
+      ✅ Success (464, 431) (646ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (451ms)
+   ⏱️ Episode: 6.9s
+
+   📈 Progress: 27.2% (1361/5000)
+      Success rate: 29.1% | Speed: 8/h (last 12 ep) | ETA: 459.6h
+
+📍 Episode 3103
+   Site: https://thinking-tester-contact-list.herokuapp.com/
+   Task: Sign up and create a new contact
+   📋 Playwright form fallback: 2 steps from DOM
+   📋 Planned 2 steps [playwright] (117ms)
+      → 1) type 'Email' → 'bob.j@demo.com...'
+      → 2) click 'Submit'
+   Step 1: type 'Email' → 'bob.j@demo.com...'
+      ✅ Success (128, 229) (660ms)
+   Step 2: click 'Submit'
+      ✅ Success (73, 308) (825ms)
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.1% | Speed: 12/h (last 13 ep) | ETA: 308.0h
+
+📍 Episode 3104
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
+   📋 Playwright calculator: (25 * 4) - 17 → 4 steps
+   📋 Planned 4 steps [playwright] (448ms)
+      → 1) type 'First number' → '25...'
+      → 2) click 'Multiply'
+      → 3) type 'Second number' → '4...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '25...'
+      ✅ Success (464, 399) (663ms)
+   Step 2: click 'Multiply'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '4...'
+      ✅ Success (464, 431) (629ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (467ms)
+   ⏱️ Episode: 6.9s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 12/h (last 14 ep) | ETA: 310.6h
+
+📍 Episode 3105
+   Site: https://humanbenchmark.com/tests/aim
+   Task: Click 30 targets as fast as possible
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Click to start'
+   Step 1: click 'Click to start'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.1s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 11/h (last 15 ep) | ETA: 345.7h
+
+📍 Episode 3106
+   Site: https://www.booking.com/
+   Task: Search for hotels in Barcelona, Spain for 2 adults
+   📋 Playwright search: type 'hotels in Barcelona...' in search box
+   📋 Planned 2 steps [playwright] (173ms)
+      → 1) type 'search' → 'hotels in Barcelona...'
+      → 2) click 'search submit'
+   Step 1: type 'search' → 'hotels in Barcelona...'
+      ✅ Success (86, 596) (805ms)
+   Step 2: click 'search submit'
+      ⚠️ No visible change (4.2s)
+   📋 Planned 1 steps [vlm] (11.1s)
+      → 1) type 'Search' → 'Tokyo...'
+   🔄 Re-planning: task has more to do | Done so far: 2 steps
+   Step 3: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 109.6s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 9/h (last 16 ep) | ETA: 383.0h
+
+📍 Episode 3107
+   Site: https://practice.expandtesting.com/
+   Task: Complete various form types
+   📋 Playwright generic input: type 'test' in first input
+   📋 Planned 1 steps [playwright] (136ms)
+      → 1) type 'input' → 'test...'
+   Step 1: type 'input' → 'test...'
+      ⚠️ No visible change (2.6s)
+   📋 Planned 1 steps [vlm] (11.0s)
+      → 1) Click to start 'submit'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: click 'submit'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 106.3s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 9/h (last 17 ep) | ETA: 419.1h
+
+📍 Episode 3108
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to a subpage, then use the browser back button to return
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Start button'
+   Step 1: click 'Start button'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.2s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 8/h (last 18 ep) | ETA: 454.2h
+
+📍 Episode 3109
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
+   📋 Playwright calculator: (25 * 4) - 17 → 4 steps
+   📋 Planned 4 steps [playwright] (364ms)
+      → 1) type 'First number' → '25...'
+      → 2) click 'Multiply'
+      → 3) type 'Second number' → '4...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '25...'
+      ✅ Success (464, 399) (638ms)
+   Step 2: click 'Multiply'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '4...'
+      ✅ Success (464, 431) (630ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (481ms)
+   ⏱️ Episode: 6.9s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 8/h (last 19 ep) | ETA: 456.9h
+
+📍 Episode 3110
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+   📋 Planned 1 steps [vlm] (4.8s)
+      → 1) type 'Username' → 'tomsmith...'
+   Step 1: type 'Username' → 'tomsmith...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 97.0s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 7/h (last 20 ep) | ETA: 489.9h
+
+📍 Episode 3111
+   Site: https://practicesoftwaretesting.com/
+   Task: Complete full user registration, login, and profile setup
+   📋 Planned 1 steps [vlm] (11.7s)
+      → 1) type 'Username' → 'admin...'
+   Step 1: type 'Username' → 'admin...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 105.2s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 7/h (last 21 ep) | ETA: 525.7h
+
+📍 Episode 3112
+   Site: https://www.google.com/travel/flights
+   Task: Search for round-trip flights from San Francisco to Tokyo for next month
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) type 'Search' → 'Tokyo...'
+   Step 1: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.4s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 6/h (last 22 ep) | ETA: 560.9h
+
+📍 Episode 3113
+   Site: http://uitestingplayground.com/textinput
+   Task: Type a new button name and click the button to change its text
+   📋 Playwright generic input: type 'test' in first input
+   📋 Planned 1 steps [playwright] (109ms)
+      → 1) type 'input' → 'test...'
+   Step 1: type 'input' → 'test...'
+      ✅ Success (640, 400) (626ms)
+   📋 Planned 1 steps [vlm] (10.7s)
+      → 1) type 'type'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: type 'type'
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+      ❌ Element not found (target: 'type') (33.5s)
+   ⏱️ Episode: 48.9s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 6/h (last 23 ep) | ETA: 577.7h
+
+📍 Episode 3114
+   Site: https://testsmith-io.github.io/locator-game/
+   Task: Find and click the correct element based on hints
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Click to start'
+   Step 1: click 'Click to start'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.2s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 29.0% | Speed: 6/h (last 24 ep) | ETA: 612.8h
+
+📍 Episode 3115
+   Site: https://www.booking.com/
+   Task: Search for hotels in Barcelona, Spain for 2 adults
+   📋 Playwright search: type 'hotels in Barcelona...' in search box
+   📋 Planned 2 steps [playwright] (103ms)
+      → 1) type 'search' → 'hotels in Barcelona...'
+      → 2) click 'search submit'
+   Step 1: type 'search' → 'hotels in Barcelona...'
+      ✅ Success (86, 596) (776ms)
+   Step 2: click 'search submit'
+      ⚠️ No visible change (4.2s)
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) type 'Search' → ' query...'
+   🔄 Re-planning: task has more to do | Done so far: 2 steps
+   Step 3: type 'Search' → ' query...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 109.4s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.9% | Speed: 6/h (last 25 ep) | ETA: 649.9h
+
+📍 Episode 3116
+   Site: https://www.airbnb.com/
+   Task: Search for a place to stay in Paris for 2 guests, browse listings
+   📋 Playwright search: type 'a place to stay in P...' in search box
+   📋 Planned 2 steps [playwright] (187ms)
+      → 1) type 'search' → 'a place to stay in P...'
+      → 2) click 'search submit'
+   Step 1: type 'search' → 'a place to stay in Paris ...'
+      ✅ Success (346, 136) (1.4s)
+   Step 2: click 'search submit'
+      ✅ Success (1023, 127) (697ms)
+   ⏱️ Episode: 5.3s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.9% | Speed: 6/h (last 25 ep) | ETA: 649.5h
+
+📍 Episode 3117
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   📋 Playwright calculator: 42 + 13 → 4 steps
+   📋 Planned 4 steps [playwright] (359ms)
+      → 1) type 'First number' → '42...'
+      → 2) click 'Add'
+      → 3) type 'Second number' → '13...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '42...'
+      ✅ Success (464, 399) (633ms)
+   Step 2: click 'Add'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '13...'
+      ✅ Success (464, 431) (666ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (470ms)
+   ⏱️ Episode: 7.0s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.9% | Speed: 6/h (last 25 ep) | ETA: 566.8h
+
+📍 Episode 3118
+   Site: https://demoqa.com/automation-practice-form
+   Task: Fill out the complete registration form and submit
+   📋 Playwright form fallback: 5 steps from DOM
+   📋 Planned 5 steps [playwright] (839ms)
+      → 1) type 'First Name' → 'John...'
+      → 2) type 'Last Name' → 'Doe...'
+      → 3) type 'Mobile Number' → '555-123-4567...'
+      → 4) type 'Current Address' → '123 Main St...'
+      → 5) click 'Submit'
+   Step 1: type 'First Name' → 'John...'
+      ⚠️ No visible change (2.7s)
+   Step 2: type 'Last Name' → 'Doe...'
+      ⚠️ No visible change (2.7s)
+   Step 3: type 'Mobile Number' → '555-123-4567...'
+      ⚠️ No visible change (2.7s)
+   Step 4: type 'Current Address' → '123 Main St...'
+      ✅ Success (718, 400) (739ms)
+   Step 5: click 'Submit'
+      ✅ Success (902, 556) (569ms)
+   ⏱️ Episode: 14.2s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.9% | Speed: 7/h (last 25 ep) | ETA: 536.7h
+
+📍 Episode 3119
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   📋 Playwright calculator: 42 + 13 → 4 steps
+   📋 Planned 4 steps [playwright] (393ms)
+      → 1) type 'First number' → '42...'
+      → 2) click 'Add'
+      → 3) type 'Second number' → '13...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '42...'
+      ✅ Success (464, 399) (670ms)
+   Step 2: click 'Add'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '13...'
+      ✅ Success (464, 431) (640ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (474ms)
+   ⏱️ Episode: 7.0s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.8% | Speed: 7/h (last 25 ep) | ETA: 512.0h
+
+📍 Episode 3120
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+   📋 Planned 1 steps [vlm] (13.6s)
+      → 1) type 'Login'
+   Step 1: type 'Login'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 105.9s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.8% | Speed: 5/h (last 25 ep) | ETA: 789.8h
+
+📍 Episode 3121
+   Site: https://humanbenchmark.com/tests/aim
+   Task: Click 30 targets as fast as possible
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Click to start'
+   Step 1: click 'Click to start'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.2s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.8% | Speed: 5/h (last 25 ep) | ETA: 789.8h
+
+📍 Episode 3122
+   Site: https://demoqa.com/text-box
+   Task: Fill in name, email, current address, and permanent address
+   📋 Playwright form fallback: 4 steps from DOM
+   📋 Planned 4 steps [playwright] (242ms)
+      → 1) type 'Full Name' → 'John Doe...'
+      → 2) type 'Current Address' → '123 Main St...'
+      → 3) type 'permanentAddress' → '123 Main St...'
+      → 4) click 'Submit'
+   Step 1: type 'Full Name' → 'John Doe...'
+      ✅ Success (718, 542) (796ms)
+   Step 2: type 'Current Address' → '123 Main St...'
+      ✅ Success (718, 682) (780ms)
+   Step 3: type 'permanentAddress' → '123 Main St...'
+      ✅ Success (718, 734) (769ms)
+   Step 4: click 'Submit'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 95.8s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.8% | Speed: 4/h (last 25 ep) | ETA: 825.4h
+
+📍 Episode 3123
+   Site: http://uitestingplayground.com/textinput
+   Task: Type a new button name and click the button to change its text
+   📋 Playwright generic input: type 'test' in first input
+   📋 Planned 1 steps [playwright] (114ms)
+      → 1) type 'input' → 'test...'
+   Step 1: type 'input' → 'test...'
+      ✅ Success (640, 400) (628ms)
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) type 'type'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: type 'type'
+      ❌ Element not found (target: 'type') (33.5s)
+   ⏱️ Episode: 49.0s
+
+   📈 Progress: 27.2% (1362/5000)
+      Success rate: 28.8% | Speed: 2/h (last 25 ep) | ETA: calculating...
+
+📍 Episode 3124
+   Site: https://github.com/search
+   Task: Search for 'machine learning' repositories and view the top result
+   📋 Playwright GitHub search: type 'machine learning...' + Enter
+   📋 Planned 3 steps [playwright] (69ms)
+      → 1) type 'search' → 'machine learning...'
+      → 2) press_enter 'search'
+      → 3) click 'first repository'
+   Step 1: type 'search' → 'machine learning...'
+      ⚠️ No visible change (2.8s)
+   Step 2: press_enter 'search'
+      ✅ Success (650, 192) (1.1s)
+   Step 3: click 'first repository'
+      ✅ Success (518, 161) (3.1s)
+   📋 Planned 1 steps [vlm] (11.2s)
+      → 1) type 'Search' → 'Tokyo...'
+   🔄 Re-planning: task has more to do | Done so far: 3 steps
+   Step 4: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 112.9s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.8% | Speed: 4/h (last 25 ep) | ETA: 829.6h
+
+📍 Episode 3125
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: 42 + 13 = ?
+   📋 Playwright calculator: 42 + 13 → 4 steps
+   📋 Planned 4 steps [playwright] (366ms)
+      → 1) type 'First number' → '42...'
+      → 2) click 'Add'
+      → 3) type 'Second number' → '13...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '42...'
+      ✅ Success (464, 399) (669ms)
+   Step 2: click 'Add'
+      ⚠️ No visible change (2.2s)
+   Step 3: type 'Second number' → '13...'
+      ✅ Success (464, 431) (625ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (486ms)
+   ⏱️ Episode: 6.9s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.8% | Speed: 5/h (last 25 ep) | ETA: 780.8h
+
+📍 Episode 3126
+   Site: http://uitestingplayground.com/textinput
+   Task: Type a new button name and click the button to change its text
+   📋 Playwright generic input: type 'test' in first input
+   📋 Planned 1 steps [playwright] (96ms)
+      → 1) type 'input' → 'test...'
+   Step 1: type 'input' → 'test...'
+      ✅ Success (640, 400) (646ms)
+   📋 Planned 1 steps [vlm] (7.6s)
+      → 1) type 'type'
+   🔄 Re-planning: task has more to do | Done so far: 1 steps
+   Step 2: type 'type'
+      ❌ Element not found (target: 'type') (33.5s)
+   ⏱️ Episode: 45.7s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.8% | Speed: 5/h (last 25 ep) | ETA: 800.4h
+
+📍 Episode 3127
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
+   📋 Playwright calculator: (25 * 4) - 17 → 4 steps
+   📋 Planned 4 steps [playwright] (356ms)
+      → 1) type 'First number' → '25...'
+      → 2) click 'Multiply'
+      → 3) type 'Second number' → '4...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '25...'
+      ✅ Success (464, 399) (630ms)
+   Step 2: click 'Multiply'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '4...'
+      ✅ Success (464, 431) (624ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (494ms)
+   ⏱️ Episode: 6.9s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.8% | Speed: 5/h (last 25 ep) | ETA: 801.9h
+
+📍 Episode 3128
+   Site: https://testsheepnz.github.io/BasicCalculator.html
+   Task: Solve: (25 * 4) - 17 = ?
+   📋 Playwright calculator: (25 * 4) - 17 → 4 steps
+   📋 Planned 4 steps [playwright] (361ms)
+      → 1) type 'First number' → '25...'
+      → 2) click 'Multiply'
+      → 3) type 'Second number' → '4...'
+      → 4) click 'Calculate'
+   Step 1: type 'First number' → '25...'
+      ✅ Success (464, 399) (627ms)
+   Step 2: click 'Multiply'
+      ⚠️ No visible change (2.3s)
+   Step 3: type 'Second number' → '4...'
+      ✅ Success (464, 431) (624ms)
+   Step 4: click 'Calculate'
+      ✅ Success (420, 499) (474ms)
+   ⏱️ Episode: 6.7s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.7% | Speed: 2/h (last 25 ep) | ETA: calculating...
+
+📍 Episode 3129
+   Site: https://gh-users-search.netlify.app/
+   Task: Search for 'torvalds' and view their profile
+   📋 Planned 1 steps [vlm] (11.1s)
+      → 1) type 'Search' → 'Tokyo...'
+   Step 1: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 104.2s
+
+   📈 Progress: 27.3% (1363/5000)
+      Success rate: 28.7% | Speed: 2/h (last 25 ep) | ETA: calculating...
+
+📍 Episode 3130
+   Site: https://github.com/search
+   Task: Search for 'machine learning' repositories and view the top result
+   📋 Playwright GitHub search: type 'machine learning...' + Enter
+   📋 Planned 3 steps [playwright] (70ms)
+      → 1) type 'search' → 'machine learning...'
+      → 2) press_enter 'search'
+      → 3) click 'first repository'
+   Step 1: type 'search' → 'machine learning...'
+      ⚠️ No visible change (2.8s)
+   Step 2: press_enter 'search'
+      ✅ Success (650, 192) (1.0s)
+   Step 3: click 'first repository'
+      ✅ Success (518, 161) (3.0s)
+   📋 Planned 1 steps [vlm] (7.9s)
+      → 1) type 'Search' → 'Tokyo...'
+   🔄 Re-planning: task has more to do | Done so far: 3 steps
+   Step 4: type 'Search' → 'Tokyo...'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 109.4s
+
+   📈 Progress: 27.3% (1364/5000)
+      Success rate: 28.7% | Speed: 5/h (last 25 ep) | ETA: 802.1h
+
+📍 Episode 3131
+   Site: https://www.producthunt.com/
+   Task: Browse today's top products and click on the #1 product
+   📋 Planned 1 steps [vlm] (10.9s)
+      → 1) Click to start 'Submit'
+   Step 1: click 'Submit'
+      ⏱️ Step timeout (90.0s) (1m 30.0s)
+   ⏱️ Episode: 103.4s
+
+   📈 Progress: 27.3% (1364/5000)
+      Success rate: 28.7% | Speed: 5/h (last 25 ep) | ETA: 800.6h
+
+📍 Episode 3132
+   Site: http://the-internet.herokuapp.com/
+   Task: Navigate to 'Form Authentication' and login with tomsmith/SuperSecretPassword!
+[VLM Debug] No JSON array or object found in response:
+{"action":["type", "submit", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type", "type",
+   📋 Planned 1 steps [vlm] (1m 52.9s)
+      → 1) type 'Username' → 'tomsmith...'
+   Step 1: type 'Username' → 'tomsmith...'
+   💾 Saved 7 trajectories to trajectories_20260208_221021.json
+[Border] Green border deactivated
+
+============================================================
+📊 Final Statistics
+============================================================
+   BEFORE (session start):
+      Successful: 1359 | Failed: 2742 | Total: 4659 | Episodes: 3090
+   AFTER (session end):
+      Successful: 1364 | Failed: 2790 | Total: 4749 | Episodes: 3131
+   SESSION DELTA:
+      +5 successful | +48 failed | +90 total | +41 episodes
+      Session time: 50.5m | Success rate this session: 5.6% | Speed: 6/h
+============================================================
+
+🛑 Interrupted. Progress saved.
+D:\danie\Documents\Code Projects\anorha-control\.venv\Lib\site-packages\torch\nn\modules\rnn.py:1123: UserWarning: RNN module weights are not part of single contiguous chunk of meguous chunk of memory. This means they need to be compacted at every call, possibly greatly increasing memory usage. To compact weights again call flatten_paramet internally at C:ers(). (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\aten\src\ATen\native\cudnn\RNN.cpp:1410.)
+  result = _VF.lstm(

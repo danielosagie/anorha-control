@@ -28,7 +28,7 @@ from PIL import Image
 
 # Local imports
 from ..models.vlm_subsystems import VLMSubsystems, GroundingResult
-from .grounding_harness import GroundingHarness, GroundingHarnessResult
+from .grounding_harness import GroundingHarness, GroundingHarnessResult, _get_synonyms
 from ..models.local_llm import LocalLLM, TaskPlanner
 from ..utils.overlay import get_indicator
 from .task_curriculum import TaskCurriculum, Difficulty
@@ -62,9 +62,12 @@ class TrajectoryData:
     success: bool = False
     screen_size: List[int] = field(default_factory=lambda: [1920, 1080])
     task_type: str = ""  # click, type, scroll
+    target_label: str = ""  # e.g. "Submit", "Username" - for Vision TRM training
+    task_category: str = ""  # TaskCategory.value for task embedding (forms, precision, etc.)
     source: str = "vlm"  # vlm, human, random
     timestamp: str = ""
     normalized: bool = True  # coords are 0-1; screen_size used for denormalization when executing
+    screenshot_path: str = ""  # Optional: path to saved screenshot for Vision TRM training
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -79,9 +82,20 @@ class GatheringProgress:
     episodes_completed: int = 0
     start_time: float = field(default_factory=time.time)
     
+    # Rolling window for ETA (last N episodes)
+    _recent_episodes: List[Tuple[float, int]] = field(default_factory=list, repr=False)  # (end_time, successful_count)
+    ROLLING_WINDOW: int = 25  # Larger window = smoother ETA
+    MIN_SPAN_MINUTES: float = 15.0  # Use overall rate until we have enough recent data
+    
     # Training targets
     target_trajectories: int = 5000
     target_success_rate: float = 0.80
+    
+    def record_episode(self, end_time: float, successful_count: int):
+        """Record episode for rolling ETA. Keeps last N episodes."""
+        self._recent_episodes.append((end_time, successful_count))
+        if len(self._recent_episodes) > self.ROLLING_WINDOW:
+            self._recent_episodes.pop(0)
     
     @property
     def success_rate(self) -> float:
@@ -97,18 +111,45 @@ class GatheringProgress:
     def elapsed_hours(self) -> float:
         return (time.time() - self.start_time) / 3600
     
+    def _overall_speed(self) -> float:
+        """Speed based on full run (used when rolling window is insufficient)."""
+        if self.elapsed_hours <= 0:
+            return 0.0
+        return self.successful_trajectories / self.elapsed_hours
+    
     @property
     def trajectories_per_hour(self) -> float:
-        if self.elapsed_hours == 0:
-            return 0
-        return self.total_trajectories / self.elapsed_hours
+        """Speed: rolling window when span >= MIN_SPAN_MINUTES, else overall rate."""
+        return self._trajectories_per_hour_impl()[0]
+
+    def _trajectories_per_hour_impl(self) -> Tuple[float, str]:
+        """Returns (speed, source_label) for display."""
+        overall = self._overall_speed()
+        if len(self._recent_episodes) < 2:
+            return overall, "overall"
+        first_time = self._recent_episodes[0][0]
+        last_time = self._recent_episodes[-1][0]
+        span_minutes = (last_time - first_time) / 60
+        if span_minutes < self.MIN_SPAN_MINUTES:
+            return overall, "overall"
+        span_hours = span_minutes / 60
+        successful_in_window = sum(c for _, c in self._recent_episodes)
+        rolling_speed = successful_in_window / span_hours
+        if rolling_speed <= 0:
+            return overall, "overall"
+        n = len(self._recent_episodes)
+        return rolling_speed, f"last {n} ep"
     
     @property
     def eta_hours(self) -> float:
-        if self.trajectories_per_hour == 0 or self.success_rate == 0:
+        """ETA to hit target based on speed. Uses overall rate when rolling is sparse."""
+        speed = self.trajectories_per_hour
+        if speed <= 0:
             return float('inf')
         remaining = self.target_trajectories - self.successful_trajectories
-        return remaining / (self.trajectories_per_hour * max(0.01, self.success_rate))
+        if remaining <= 0:
+            return 0.0
+        return remaining / speed
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -143,16 +184,32 @@ class GathererConfig:
     # Data settings
     data_dir: Path = Path("data/trajectories")
     save_every: int = 10  # Save after N successful trajectories
+    save_screenshots: bool = False  # Save screenshots for Vision TRM training (crap-top path)
     target_trajectories: int = 100000  # Target: 100k for good TRM training
     
     # Episode settings
     max_episode_steps: int = 15
+    grounding_timeout: float = 30.0  # Cap grounding (DOM+OCR+VLM) at 30s to fail fast
+    step_timeout: float = 90.0  # Per-step safety cap (grounding + execution)
+    grounding_refinement_max: int = 2  # Retry grounding with alternative phrasings when no visible change
+    grounding_model: str = "vlm"  # "vlm" | "uground" | "vision_trm" | "anorha_trm" (unified)
+    uground_4bit: bool = False  # Use 4-bit quant for UGround (laptop, ~2GB VRAM)
+    vision_trm_checkpoint: str = "checkpoints/vision_trm_best.pt"
+    anorha_trm_checkpoint: str = "checkpoints/anorha_trm_best.pt"
     action_delay: float = 0.2  # Fallback when action type unknown
     # Action-specific delays: type needs longer for phash to detect input change
     action_delay_type: float = 0.4
     action_delay_click: float = 0.3
     action_delay_press_enter: float = 0.5
+    # Success detection: phash threshold (sim < X = change detected). Higher = more lenient.
+    phash_success_threshold: float = 0.99  # 0.98 was too strict; subtle changes (typing, dropdowns) missed
+    # Extra sample times for slow sites (form submit, navigation). Added to base sample_times.
+    phash_extra_wait_times: List[float] = field(default_factory=lambda: [1.0, 1.5])  # s
+    # Longer waits for submit/login/calculate clicks (navigation can take 2–3s)
+    phash_extra_wait_times_submit: List[float] = field(default_factory=lambda: [2.0, 2.5, 3.0])  # s
     use_vlm_verification: bool = False  # VLM confirm success (slow, ~1 call per trajectory)
+    replan_on_failure: bool = True  # Re-plan when step fails (no visible change) so VLM can adapt
+    max_failure_replans: int = 2  # Max re-plans per episode due to failure (avoid thrashing)
     max_difficulty: Difficulty = Difficulty.MEDIUM
     execution_backend: str = "browser"  # "browser" or "desktop" for full computer use
     
@@ -223,13 +280,65 @@ class SmartDataGatherer:
         )
         
         # Robust grounding harness (multi-strategy for 97% accuracy)
-        self.grounding_harness = GroundingHarness(self.vlm)
+        uground_backend = None
+        vision_trm_backend = None
+        anorha_trm_backend = None
+        if self.config.grounding_model == "anorha_trm":
+            try:
+                from ..training.unified_trm import AnorhaTRMBackend
+                ckpt = getattr(self.config, "anorha_trm_checkpoint", "checkpoints/anorha_trm_best.pt")
+                if Path(ckpt).exists():
+                    anorha_trm_backend = AnorhaTRMBackend(ckpt)
+                    print("[DataGatherer] Anorha TRM grounding enabled (unified, crap-top)")
+                else:
+                    print(f"[DataGatherer] Anorha TRM checkpoint not found: {ckpt}, using VLM")
+            except Exception as e:
+                print(f"[DataGatherer] Anorha TRM init failed: {e}, using VLM")
+        elif self.config.grounding_model == "vision_trm":
+            try:
+                from ..training.vision_trm_training import VisionTRMBackend
+                ckpt = getattr(self.config, "vision_trm_checkpoint", "checkpoints/vision_trm_best.pt")
+                if Path(ckpt).exists():
+                    vision_trm_backend = VisionTRMBackend(ckpt)
+                    print("[DataGatherer] Vision TRM grounding enabled (crap-top, fully local)")
+                else:
+                    print(f"[DataGatherer] Vision TRM checkpoint not found: {ckpt}, using VLM")
+            except Exception as e:
+                print(f"[DataGatherer] Vision TRM init failed: {e}, using VLM")
+        elif self.config.grounding_model == "uground":
+            try:
+                from ..models.uground_backend import UGroundBackend, get_uground_available
+                if get_uground_available():
+                    import torch
+                    ug_device = "cuda:0" if (self.config.use_gpu and torch.cuda.is_available()) else "auto"
+                    uground_backend = UGroundBackend(
+                        load_in_4bit=getattr(self.config, "uground_4bit", False),
+                        device=ug_device,
+                    )
+                    print(f"[DataGatherer] UGround grounding enabled (GUI-specialized) [device={ug_device}]")
+                    print("[DataGatherer] Pre-loading UGround (~30s)...")
+                    uground_backend.preload()
+                    print("[DataGatherer] UGround ready.")
+                else:
+                    print("[DataGatherer] UGround requested but transformers not available, using VLM")
+            except Exception as e:
+                print(f"[DataGatherer] UGround init failed: {e}, using VLM")
+        self.grounding_harness = GroundingHarness(
+            self.vlm,
+            uground_backend=uground_backend,
+            vision_trm_backend=vision_trm_backend,
+            anorha_trm_backend=anorha_trm_backend,
+        )
         
         # Load existing progress
         self._load_progress()
         
         if self.config.use_gpu:
-            print("[DataGatherer] 🚀 GPU acceleration enabled for OCR/Post-processing")
+            import torch
+            if torch.cuda.is_available():
+                print(f"[DataGatherer] 🚀 GPU acceleration enabled (CUDA: {torch.cuda.get_device_name(0)})")
+            else:
+                print("[DataGatherer] GPU requested but CUDA unavailable; using CPU (check PyTorch CUDA install)")
     
     def _port_from_url(self, url: str) -> int:
         """Extract port from URL, default 8080."""
@@ -446,6 +555,7 @@ class SmartDataGatherer:
         target_label: str = "",
         value_label: str = "",
         task_objective: str = "",
+        task_category: str = "",
     ) -> Optional[TrajectoryData]:
         """
         Execute an action and record the trajectory.
@@ -476,9 +586,20 @@ class SmartDataGatherer:
             await asyncio.sleep(0.05)
             await self.backend.type_text(text)
         
-        # Multi-frame sampling: first sample uses action-specific delay, then +0.3s, +0.5s
+        # Multi-frame sampling: base + extra for slow sites (form submit, navigation)
         delay = getattr(self.config, f"action_delay_{action_type}", None) or self.config.action_delay
         sample_times = [delay, delay + 0.3, delay + 0.5]
+        tl = (target_label or "").lower()
+        is_submit_click = (
+            action_type == "click"
+            and any(k in tl for k in ("submit", "login", "calculate", "search submit", "go", "sign in"))
+        )
+        extra = (
+            getattr(self.config, "phash_extra_wait_times_submit", None) or []
+            if is_submit_click
+            else getattr(self.config, "phash_extra_wait_times", None) or []
+        )
+        sample_times.extend(delay + t for t in extra)
         success = False
         last_t = 0.0
         after_screenshot = before_screenshot  # fallback
@@ -487,7 +608,9 @@ class SmartDataGatherer:
             last_t = t
             frame = await self._screenshot()
             after_screenshot = frame
-            if self._check_action_success(before_screenshot, frame, center=(target_x, target_y)):
+            if self._check_action_success(
+                before_screenshot, frame, center=(target_x, target_y), action_type=action_type
+            ):
                 success = True
                 break
         
@@ -517,16 +640,30 @@ class SmartDataGatherer:
             }
             for p in trajectory
         ]
+        task_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{random.randint(1000,9999)}"
+        screenshot_path = ""
+        if self.config.save_screenshots and success and target_label:
+            screenshots_dir = self.config.data_dir / "screenshots"
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+            img_path = screenshots_dir / f"{task_id}.jpg"
+            try:
+                before_screenshot.resize((384, 384), Image.Resampling.LANCZOS).save(img_path, quality=85)
+                screenshot_path = str(img_path.relative_to(self.config.data_dir))
+            except Exception:
+                pass
         traj_data = TrajectoryData(
-            task_id=f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{random.randint(1000,9999)}",
+            task_id=task_id,
             target=target_norm,
             trajectory=traj_norm,
             success=success,
             screen_size=[w, h],
             task_type=action_type,
+            target_label=target_label,
+            task_category=task_category,
             source="vlm",
             timestamp=datetime.now().isoformat(),
             normalized=True,
+            screenshot_path=screenshot_path,
         )
         
         return traj_data
@@ -546,21 +683,37 @@ class SmartDataGatherer:
         return img.crop((x1, y1, x2, y2))
     
     def _check_action_success(
-        self, before: Image.Image, after: Image.Image, center: Tuple[int, int] = None
+        self, before: Image.Image, after: Image.Image, center: Tuple[int, int] = None,
+        action_type: str = "click"
     ) -> bool:
         """
         Check if action caused meaningful change. Uses perceptual hash.
-        If center provided, hash ROI only (reduces false positives from global animations).
-        Similarity < 0.97 = meaningful change.
+        For click: use ROI only (avoids false positives from global animations).
+        For type/press_enter: check full image (dropdown, results) OR ROI (input change).
         """
         from ..utils.hashing import phash_image, hash_similarity
+        threshold = getattr(self.config, "phash_success_threshold", 0.99)
+        # Slightly more lenient for type ROI (password dots, small inputs)
+        type_threshold = min(threshold + 0.005, 0.999)
+
+        def _similarity(b: Image.Image, a: Image.Image) -> float:
+            return hash_similarity(phash_image(b), phash_image(a))
+
+        if action_type == "click" and center:
+            # Click: ROI only to avoid global-animation false positives
+            b_roi = self._crop_roi(before, center[0], center[1])
+            a_roi = self._crop_roi(after, center[0], center[1])
+            return _similarity(b_roi, a_roi) < threshold
+
+        # Type/press_enter: full image (dropdown, results) OR ROI (input-only change)
+        if _similarity(before, after) < threshold:
+            return True
         if center:
-            before = self._crop_roi(before, center[0], center[1])
-            after = self._crop_roi(after, center[0], center[1])
-        hash_before = phash_image(before)
-        hash_after = phash_image(after)
-        sim = hash_similarity(hash_before, hash_after)
-        return sim < 0.97  # Meaningful change threshold
+            b_roi = self._crop_roi(before, center[0], center[1])
+            a_roi = self._crop_roi(after, center[0], center[1])
+            if _similarity(b_roi, a_roi) < type_threshold:
+                return True
+        return False
     
     def _ocr_fallback_steps(self, task, vlm_img: Image.Image) -> List[Dict[str, Any]]:
         """
@@ -683,7 +836,19 @@ class SmartDataGatherer:
             if steps:
                 return steps
         
-        # 4. Generic search task
+        # 4. The Internet - Form Authentication: navigate to /login, then fill username/password
+        if "herokuapp" in site and ("form authentication" in obj_lower or "login" in obj_lower) and sample_data:
+            steps = await self._playwright_the_internet_form_auth(task)
+            if steps:
+                return steps
+        
+        # 5. UI Playground textinput: type in input, then click the button (button text updates)
+        if "textinput" in site and "button" in obj_lower and "click" in obj_lower:
+            steps = await self._playwright_textinput_steps(task)
+            if steps:
+                return steps
+        
+        # 6. Generic search task
         if "search" in obj_lower or "find" in obj_lower or "query" in sample_data:
             query = sample_data.get("query") or sample_data.get("q") or ""
             if not query and "search" in obj_lower:
@@ -841,6 +1006,34 @@ class SmartDataGatherer:
         except Exception as e:
             print(f"   ⚠️ Calculator steps failed: {e}")
         return steps
+    
+    async def _try_playwright_github_first_repo(self, target: str) -> Optional[Tuple[int, int]]:
+        """If on GitHub search results and target is 'first repository', get first repo link bbox."""
+        if "first repository" not in (target or "").lower():
+            return None
+        page = self._get_page()
+        if not page:
+            return None
+        try:
+            url = page.url or ""
+            if "github.com" not in url or "search" not in url:
+                return None
+            await asyncio.sleep(1)  # Brief wait for results
+            for sel in [
+                'a[data-hovercard-type="repository"]',
+                'a[href^="/"][href*="/"].Link',
+                'div[data-testid="results-list"] a[href*="/"]',
+                'a[href^="/"][href*="/"]',
+            ]:
+                el = await page.query_selector(sel)
+                if el:
+                    await el.scroll_into_view_if_needed()
+                    box = await el.bounding_box()
+                    if box:
+                        return (int(box["x"] + box["width"] / 2), int(box["y"] + box["height"] / 2))
+        except Exception:
+            pass
+        return None
     
     async def _playwright_github_search_steps(self, task) -> List[Dict[str, Any]]:
         """GitHub search: input[name="q"], type query, press Enter (no submit button)."""
@@ -1014,6 +1207,136 @@ class SmartDataGatherer:
         
         return steps
     
+    async def _playwright_the_internet_form_auth(self, task) -> List[Dict[str, Any]]:
+        """The Internet: click Form Authentication link, then fill username/password."""
+        page = self._get_page()
+        if not page or not task.sample_data:
+            return []
+        username = task.sample_data.get("username", "")
+        password = task.sample_data.get("password", "")
+        if not username or not password:
+            return []
+        steps = []
+        try:
+            url = (page.url or "").lower()
+            # If on homepage, navigate to /login first (click Form Authentication link)
+            if "/login" not in url:
+                link = await page.query_selector('a[href="/login"]')
+                if not link:
+                    link = await page.get_by_text("Form Authentication", exact=False).first
+                if link:
+                    await link.scroll_into_view_if_needed()
+                    box = await link.bounding_box()
+                    if box:
+                        steps.append({
+                            "action": "click", "target": "Form Authentication", "value": "",
+                            "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                        })
+            if not steps:
+                # Already on /login, find form directly
+                pass
+            # Add username, password, login steps (need to run after navigation)
+            for field, label, val in [
+                ("username", "Username", username),
+                ("password", "Password", password),
+            ]:
+                el = await page.query_selector(f'input[name="{field}"], input[id="{field}"]')
+                if el:
+                    await el.scroll_into_view_if_needed()
+                    box = await el.bounding_box()
+                    if box:
+                        steps.append({
+                            "action": "type", "target": label, "value": val,
+                            "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                        })
+            login_btn = await page.query_selector('button[type="submit"], input[type="submit"]')
+            if login_btn:
+                await login_btn.scroll_into_view_if_needed()
+                box = await login_btn.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "click", "target": "Login", "value": "",
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            if steps:
+                # If we only have form steps (no nav), we're on /login - good
+                # If we have nav + form, we need to run nav first then re-query for form
+                # For simplicity: return nav step first; form steps will be re-queried on next plan
+                # Actually the problem: after click Form Authentication, the page changes. The form
+                # steps we got are from the CURRENT page (homepage). So we can't get form coords now.
+                # We need to either: 1) only return nav step, then replan for form, or 2) navigate via
+                # page.goto and then get form coords. Let me use page.goto for reliability.
+                if "/login" not in url:
+                    base = task.site.rstrip("/")
+                    try:
+                        await page.goto(f"{base}/login", wait_until="domcontentloaded")
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+                    steps = []
+                    for field, label, val in [
+                        ("username", "Username", username),
+                        ("password", "Password", password),
+                    ]:
+                        el = await page.query_selector(f'input[name="{field}"], input[id="{field}"]')
+                        if el:
+                            await el.scroll_into_view_if_needed()
+                            box = await el.bounding_box()
+                            if box:
+                                steps.append({
+                                    "action": "type", "target": label, "value": val,
+                                    "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                                })
+                    login_btn = await page.query_selector('button[type="submit"], input[type="submit"]')
+                    if login_btn:
+                        await login_btn.scroll_into_view_if_needed()
+                        box = await login_btn.bounding_box()
+                        if box:
+                            steps.append({
+                                "action": "click", "target": "Login", "value": "",
+                                "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                            })
+                if steps:
+                    print(f"   📋 Playwright the-internet form auth: {len(steps)} steps")
+        except Exception as e:
+            print(f"   ⚠️ The-internet form auth failed: {e}")
+        return steps
+    
+    async def _playwright_textinput_steps(self, task) -> List[Dict[str, Any]]:
+        """UI Playground textinput: type in input, then click the button (text updates)."""
+        page = self._get_page()
+        if not page:
+            return []
+        steps = []
+        try:
+            inputs = await page.query_selector_all("input:not([type=hidden]):not([type=submit])")
+            if not inputs:
+                return []
+            el = inputs[0]
+            value = "test"
+            await el.scroll_into_view_if_needed()
+            box = await el.bounding_box()
+            if box:
+                steps.append({
+                    "action": "type", "target": "input", "value": value,
+                    "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                })
+            # Button that updates its text when we type (often next to input)
+            btn = await page.query_selector("button, input[type=button]")
+            if btn:
+                await btn.scroll_into_view_if_needed()
+                box = await btn.bounding_box()
+                if box:
+                    steps.append({
+                        "action": "click", "target": "Button", "value": "",
+                        "x": int(box["x"] + box["width"] / 2), "y": int(box["y"] + box["height"] / 2)
+                    })
+            if steps:
+                print(f"   📋 Playwright textinput: type + click button ({len(steps)} steps)")
+        except Exception as e:
+            print(f"   ⚠️ Playwright textinput failed: {e}")
+        return steps
+    
     async def _generic_input_fallback(self, task) -> List[Dict[str, Any]]:
         """
         Fallback when task is "type into input" but we have no sample_data.
@@ -1133,7 +1456,10 @@ class SmartDataGatherer:
         steps_done = 0
         last_success = False
         last_step_desc = ""  # "click 'Submit'" - passed to next plan for context
-        
+        last_identical_key = None
+        last_identical_count = 0
+        failure_replan_count = 0
+
         while steps_done < self.config.max_episode_steps and not self._killed:
             if self._paused:
                 await asyncio.sleep(0.5)
@@ -1182,6 +1508,17 @@ class SmartDataGatherer:
             
             plan_sec = time.time() - plan_start
             print(f"   📋 Planned {len(steps)} steps [{plan_source}] {self._fmt_duration(plan_sec)}")
+            # Show what we're about to do (helps debug re-plan loops)
+            for j, s in enumerate(steps[:5], 1):
+                a = s.get("action", "click") if isinstance(s, dict) else getattr(s, "action", "click")
+                t = (s.get("target", "") or "").strip() or "?"
+                v = s.get("value", "") if isinstance(s, dict) else getattr(s, "value", "")
+                line = f"      → {j}) {a} '{t}'" + (f" → '{str(v)[:20]}...'" if v else "")
+                print(line)
+            if len(steps) > 5:
+                print(f"      → ... +{len(steps) - 5} more")
+            if steps_done > 0 and plan_source == "vlm":
+                print(f"   🔄 Re-planning: task has more to do | Done so far: {steps_done} steps")
             should_replan = False
             
             for i, step in enumerate(steps):
@@ -1203,51 +1540,122 @@ class SmartDataGatherer:
                     print(f"   Step {steps_done+1}: {action} '{target}' → ⚠️ Skipped")
                     continue
                 
-                print(f"   Step {steps_done+1}: {action} '{target}'")
+                val_preview = f" → '{str(value)[:25]}...'" if value and action == "type" else ""
+                print(f"   Step {steps_done+1}: {action} '{target}'{val_preview}")
                 step_start = time.time()
-                
-                if has_coords:
-                    target_x = int(step["x"])
-                    target_y = int(step["y"])
-                else:
+
+                async def _run_step():
+                    if has_coords:
+                        tx, ty = int(step["x"]), int(step["y"])
+                        traj = await self._execute_and_record(
+                            tx, ty,
+                            action_type="press_enter" if action == "press_enter" else action,
+                            text=value if action == "type" else None,
+                            target_label=target,
+                            value_label=value,
+                            task_objective=task.objective,
+                            task_category=task.category.value if hasattr(task, "category") else "",
+                        )
+                        return (traj, tx, ty)
+                    coords = await self._try_playwright_github_first_repo(target)
+                    if coords:
+                        target_x, target_y = coords
+                        step["x"] = target_x
+                        step["y"] = target_y
+                        act_type = "press_enter" if action == "press_enter" else action
+                        traj = await self._execute_and_record(
+                            target_x, target_y,
+                            action_type=act_type,
+                            text=value if action == "type" else None,
+                            target_label=target,
+                            value_label=value,
+                            task_objective=task.objective,
+                            task_category=task.category.value if hasattr(task, "category") else "",
+                        )
+                        return (traj, target_x, target_y)
                     screenshot = await self._screenshot()
-                    # Robust grounding: DOM → OCR → OCR fuzzy → VLM → VLM retry
                     playwright_elements = await self._get_playwright_elements() if self._get_page() else []
-                    grounding = await self.grounding_harness.ground(
-                        target, screenshot,
-                        task_objective=task.objective or "",
-                        playwright_elements=playwright_elements,
+                    synonyms = [a for a in _get_synonyms(target) if a.strip().lower() != target.strip().lower()]
+                    refinement_max = getattr(self.config, "grounding_refinement_max", 2)
+                    candidates = [target] + synonyms[:refinement_max]
+                    last_traj = None
+                    last_tx = last_ty = 0
+                    for alt_target in candidates:
+                        try:
+                            grounding = await asyncio.wait_for(
+                                self.grounding_harness.ground(
+                                    alt_target, screenshot,
+                                    task_objective=task.objective or "",
+                                    task_category=task.category.value if hasattr(task, "category") else "",
+                                    playwright_elements=playwright_elements,
+                                ),
+                                timeout=self.config.grounding_timeout,
+                            )
+                        except asyncio.TimeoutError:
+                            grounding = GroundingHarnessResult(found=False)
+                        if not grounding.found:
+                            continue
+                        target_x = int(grounding.x)
+                        target_y = int(grounding.y)
+                        act_type = "press_enter" if action == "press_enter" else action
+                        traj = await self._execute_and_record(
+                            target_x, target_y,
+                            action_type=act_type,
+                            text=value if action == "type" else None,
+                            target_label=target,
+                            value_label=value,
+                            task_objective=task.objective,
+                            task_category=task.category.value if hasattr(task, "category") else "",
+                        )
+                        last_traj = traj
+                        last_tx, last_ty = target_x, target_y
+                        if traj.success:
+                            return (traj, target_x, target_y)
+                        screenshot = await self._screenshot()
+                    if last_traj is not None:
+                        return (last_traj, last_tx, last_ty)
+                    return (None, 0, 0)
+
+                try:
+                    traj, target_x, target_y = await asyncio.wait_for(
+                        _run_step(),
+                        timeout=getattr(self.config, "step_timeout", 90.0),
                     )
-                    if not grounding.found:
-                        step_sec = time.time() - step_start
-                        print(f"      ❌ Element not found (target: '{target}') {self._fmt_duration(step_sec)}")
-                        self.progress.failed_trajectories += 1
-                        self.progress.total_trajectories += 1
-                        continue
-                    target_x = int(grounding.x)
-                    target_y = int(grounding.y)
-                
-                act_type = "press_enter" if action == "press_enter" else action
-                traj = await self._execute_and_record(
-                    target_x, target_y,
-                    action_type=act_type,
-                    text=value if action == "type" else None,
-                    target_label=target,
-                    value_label=value,
-                    task_objective=task.objective,
-                )
-                
+                except asyncio.TimeoutError:
+                    step_sec = time.time() - step_start
+                    print(f"      ⏱️ Step timeout ({getattr(self.config, 'step_timeout', 90)}s) {self._fmt_duration(step_sec)}")
+                    self.progress.failed_trajectories += 1
+                    self.progress.total_trajectories += 1
+                    continue
+                if traj is None:
+                    step_sec = time.time() - step_start
+                    print(f"      ❌ Element not found (target: '{target}') {self._fmt_duration(step_sec)}")
+                    self.progress.failed_trajectories += 1
+                    self.progress.total_trajectories += 1
+                    continue
+
                 if traj:
                     steps_done += 1
                     step_source = "playwright" if has_coords else "vlm"
                     if step_source != "playwright":
                         episode_trajectories.append(traj)
                     step_sec = time.time() - step_start
+                    # Loop detector: stop after 3 identical steps with no visible change
+                    step_key = (target.lower(), action)
                     if traj.success:
                         last_success = True
                         if step_source != "playwright":
                             self.progress.successful_trajectories += 1
                         print(f"      ✅ Success ({target_x}, {target_y}) {self._fmt_duration(step_sec)}")
+                        # Loop detector: same step 3x even with "success" = likely stuck (e.g. re-typing Search)
+                        if step_key == last_identical_key:
+                            last_identical_count += 1
+                            if last_identical_count >= 3:
+                                print(f"   🔁 Loop detected: same step 3x in a row, stopping")
+                                break
+                        else:
+                            last_identical_key = step_key
+                            last_identical_count = 1
                         # Only re-plan when we've finished ALL steps in current batch
                         if i >= len(steps) - 1 and self._task_has_more_to_do(task, steps_done, last_action=action):
                             should_replan = True
@@ -1258,8 +1666,32 @@ class SmartDataGatherer:
                             await asyncio.sleep(1.5)
                             break
                     else:
+                        if step_key == last_identical_key:
+                            last_identical_count += 1
+                            if last_identical_count >= 3:
+                                print(f"   🔁 Loop detected: same step 3x with no change, stopping")
+                                break
+                        else:
+                            last_identical_key = step_key
+                            last_identical_count = 1
                         self.progress.failed_trajectories += 1
                         print(f"      ⚠️ No visible change {self._fmt_duration(step_sec)}")
+                        # Plan refinement on failure: re-plan so VLM can try different approach
+                        if (
+                            getattr(self.config, "replan_on_failure", True)
+                            and failure_replan_count < getattr(self.config, "max_failure_replans", 2)
+                            and last_identical_count < 3
+                        ):
+                            # Trust Playwright: continue to next step instead of VLM replan (avoids
+                            # wrong suggestions like "type First number" after "click Multiply")
+                            if plan_source == "playwright" and i < len(steps) - 1:
+                                should_replan = False
+                                # Don't break; continue to next Playwright step
+                            else:
+                                should_replan = True
+                                last_step_desc = f"FAILED: {action} '{target}' at ({target_x},{target_y}) - no visible change"
+                                failure_replan_count += 1
+                                break
                     self.progress.total_trajectories += 1
             
             if not should_replan:
@@ -1279,6 +1711,15 @@ class SmartDataGatherer:
         self._running = True
         pending_trajectories = []
         
+        # Baseline for before/after comparison
+        session_start = time.time()
+        baseline = {
+            "successful": self.progress.successful_trajectories,
+            "failed": self.progress.failed_trajectories,
+            "total": self.progress.total_trajectories,
+            "episodes": self.progress.episodes_completed,
+        }
+        
         print("\n" + "=" * 60)
         print("🤖 SMART DATA GATHERER: VLM-Guided Exploration")
         print("   Press Cmd+Shift+Escape to stop | Cmd+Shift+P to pause")
@@ -1287,6 +1728,7 @@ class SmartDataGatherer:
         print(f"\n📊 Target: {self.progress.target_trajectories} successful trajectories")
         print(f"   Current: {self.progress.successful_trajectories}")
         print(f"   Remaining: {self.progress.target_trajectories - self.progress.successful_trajectories}")
+        print(f"   Grounding timeout: {self.config.grounding_timeout}s (fail fast)")
         
         self.indicator.start()
         # Init backend with retry
@@ -1339,6 +1781,8 @@ class SmartDataGatherer:
                         pending_trajectories = []
                 
                 self._save_progress()  # Save after every episode
+                successful_this_ep = sum(1 for t in episode_trajs if t.success)
+                self.progress.record_episode(time.time(), successful_this_ep)
                 self._print_progress()
                 await asyncio.sleep(1)
         
@@ -1346,25 +1790,48 @@ class SmartDataGatherer:
             # Save remaining
             if pending_trajectories:
                 self._save_trajectories(pending_trajectories)
-            
             self._save_progress()
+            if self._killed:
+                # Fast exit: skip slow model/browser cleanup (UGround/PyTorch can take 10+ min)
+                print("\n   ⚡ Fast exit (skipping model unload). Progress saved.")
+                self.indicator.stop()
+                import os
+                os._exit(0)
             await self._close_backend_safe()
             self.indicator.stop()
             
+            # Before/after comparison
+            session_sec = time.time() - session_start
+            p = self.progress
+            delta_succ = p.successful_trajectories - baseline["successful"]
+            delta_fail = p.failed_trajectories - baseline["failed"]
+            delta_total = p.total_trajectories - baseline["total"]
+            delta_ep = p.episodes_completed - baseline["episodes"]
+            rate = delta_succ / (session_sec / 3600) if session_sec > 0 else 0
+            
             print("\n" + "=" * 60)
-            print("📊 Final Statistics:")
-            for key, value in self.progress.to_dict().items():
-                print(f"   {key}: {value}")
+            print("📊 Final Statistics")
+            print("=" * 60)
+            print("   BEFORE (session start):")
+            print(f"      Successful: {baseline['successful']} | Failed: {baseline['failed']} | Total: {baseline['total']} | Episodes: {baseline['episodes']}")
+            print("   AFTER (session end):")
+            print(f"      Successful: {p.successful_trajectories} | Failed: {p.failed_trajectories} | Total: {p.total_trajectories} | Episodes: {p.episodes_completed}")
+            print("   SESSION DELTA:")
+            print(f"      +{delta_succ} successful | +{delta_fail} failed | +{delta_total} total | +{delta_ep} episodes")
+            sess_rate = delta_succ / max(1, delta_total) if delta_total > 0 else 0.0
+            print(f"      Session time: {session_sec/60:.1f}m | Success rate this session: {sess_rate:.1%} | Speed: {rate:.0f}/h")
             print("=" * 60)
     
     def _print_progress(self):
-        """Print current progress."""
+        """Print current progress. ETA uses rolling window (25 ep) or overall rate."""
         p = self.progress
+        speed, source = p._trajectories_per_hour_impl()
+        eta_str = f"{p.eta_hours:.1f}h" if p.eta_hours < 1000 else "calculating..."
         print(f"\n   📈 Progress: {p.progress_percent:.1f}% "
               f"({p.successful_trajectories}/{p.target_trajectories})")
         print(f"      Success rate: {p.success_rate:.1%} | "
-              f"Speed: {p.trajectories_per_hour:.0f}/h | "
-              f"ETA: {p.eta_hours:.1f}h")
+              f"Speed: {speed:.0f}/h ({source}) | "
+              f"ETA: {eta_str}")
 
 
 # =============================================================================
@@ -1385,6 +1852,7 @@ async def main():
     parser.add_argument("--visible", action="store_true", help="Show browser window")
     parser.add_argument("--model", type=str, default="moondream", help="VLM: moondream (default), llava-phi3, llava, Me7war/Astria")
     parser.add_argument("--vlm-timeout", type=float, default=600, help="VLM request timeout (seconds, CPU needs ~10 min)")
+    parser.add_argument("--grounding-timeout", type=float, default=30, help="Cap grounding (DOM+OCR+VLM) at N seconds (fail fast)")
     parser.add_argument("--gpu", action="store_true", default=True, help="Use GPU for OCR (default: on)")
     parser.add_argument("--no-gpu", action="store_false", dest="gpu", help="Disable GPU (CPU-only)")
     parser.add_argument("--llamacpp", action="store_true", help="Use llama.cpp backend")
@@ -1392,6 +1860,15 @@ async def main():
     parser.add_argument("--vlm-verify", action="store_true", help="Use VLM to verify action success (slow, ~1 call per trajectory)")
     parser.add_argument("--backend", type=str, default="browser", choices=["browser", "desktop"],
                         help="Execution backend: browser (Playwright) or desktop (pyautogui/screen)")
+    parser.add_argument("--grounding", type=str, default="vlm", choices=["vlm", "uground", "vision_trm", "anorha_trm"],
+                        help="Grounding: vlm | uground | vision_trm | anorha_trm (unified)")
+    parser.add_argument("--uground-4bit", action="store_true", help="Use 4-bit quant UGround (laptop, ~2GB VRAM)")
+    parser.add_argument("--vision-trm-checkpoint", type=str, default="checkpoints/vision_trm_best.pt",
+                        help="Path to Vision TRM checkpoint (for --grounding vision_trm)")
+    parser.add_argument("--anorha-trm-checkpoint", type=str, default="checkpoints/anorha_trm_best.pt",
+                        help="Path to Anorha TRM checkpoint (for --grounding anorha_trm)")
+    parser.add_argument("--save-screenshots", action="store_true",
+                        help="Save screenshots for Vision TRM training (crap-top path, fully local)")
     
     args = parser.parse_args()
     
@@ -1400,11 +1877,17 @@ async def main():
         target_trajectories=args.target,
         vlm_model=args.model,
         vlm_timeout=args.vlm_timeout,
+        grounding_timeout=args.grounding_timeout,
         use_gpu=args.gpu,
         use_vlm_verification=args.vlm_verify,
         vlm_backend="llamacpp" if args.llamacpp else "ollama",
         vlm_url=args.llamacpp_url if args.llamacpp else "http://localhost:11434",
         execution_backend=args.backend,
+        grounding_model=args.grounding,
+        uground_4bit=getattr(args, "uground_4bit", False),
+        vision_trm_checkpoint=getattr(args, "vision_trm_checkpoint", "checkpoints/vision_trm_best.pt"),
+        anorha_trm_checkpoint=getattr(args, "anorha_trm_checkpoint", "checkpoints/anorha_trm_best.pt"),
+        save_screenshots=getattr(args, "save_screenshots", False),
     )
     
     _gatherer = SmartDataGatherer(config)

@@ -80,27 +80,29 @@ class GroundingHarnessResult:
 
 class GroundingHarness:
     """
-    Robust grounding: chain DOM → OCR → OCR fuzzy → VLM → VLM retry.
+    Robust grounding: chain DOM → OCR → OCR fuzzy → VLM/UGround/VisionTRM/AnorhaTRM → VLM retry.
+    Use anorha_trm_backend for unified model (grounding + trajectory, crap-top).
+    Use uground_backend for GUI-specialized grounding (77%+ vs 16% GPT-4) when available.
+    Use vision_trm_backend for vision-only grounding (crap-top).
     """
     
-    def __init__(self, vlm_subsystems):
+    def __init__(self, vlm_subsystems, uground_backend=None, vision_trm_backend=None, anorha_trm_backend=None):
         self.vlm = vlm_subsystems
+        self.uground = uground_backend  # Optional: UGroundBackend for locate
+        self.vision_trm = vision_trm_backend  # Optional: VisionTRMBackend (crap-top)
+        self.anorha_trm = anorha_trm_backend  # Optional: AnorhaTRMBackend (unified grounding+trajectory)
     
-    async def ground(
+    def ground_sync(
         self,
         target: str,
         screenshot: Image.Image,
         task_objective: str = "",
+        task_category: str = "",
         playwright_elements: Optional[List[Dict[str, Any]]] = None,
     ) -> GroundingHarnessResult:
         """
-        Find screen coordinates for target. Tries multiple strategies.
-        
-        Args:
-            target: What to find (e.g. "Submit", "Username")
-            screenshot: Current screen image
-            task_objective: Task context for VLM (e.g. "Login with admin")
-            playwright_elements: Optional list of {text, x, y, width, height} from DOM
+        Sync grounding: finds screen coordinates for target. Use ground_sync via
+        asyncio.to_thread when timeout via asyncio.wait_for is needed.
         """
         target = (target or "").strip()
         if not target:
@@ -139,18 +141,33 @@ class GroundingHarness:
             return result
         
         # 5. VLM locate with task context
-        result = self._vlm_locate_with_context(target, screenshot, task_objective)
+        result = self._vlm_locate_with_context(target, screenshot, task_objective, task_category)
         if result.found:
             return result
         
         # 6. VLM locate with alternative phrasings
         for phrase in self._alternative_phrasings(target):
-            result = self._vlm_locate_with_context(phrase, screenshot, task_objective)
+            result = self._vlm_locate_with_context(phrase, screenshot, task_objective, task_category)
             if result.found:
                 result.source = "vlm_retry"
                 return result
         
         return GroundingHarnessResult(found=False)
+
+    async def ground(
+        self,
+        target: str,
+        screenshot: Image.Image,
+        task_objective: str = "",
+        task_category: str = "",
+        playwright_elements: Optional[List[Dict[str, Any]]] = None,
+    ) -> GroundingHarnessResult:
+        """Async wrapper: runs ground_sync in thread so asyncio.wait_for can timeout."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.ground_sync,
+            target, screenshot, task_objective, task_category, playwright_elements,
+        )
     
     def _match_dom_elements(
         self, target: str, elements: List[Dict[str, Any]]
@@ -231,9 +248,34 @@ class GroundingHarness:
         return GroundingHarnessResult(found=False)
     
     def _vlm_locate_with_context(
-        self, target: str, screenshot: Image.Image, task_objective: str
+        self,
+        target: str,
+        screenshot: Image.Image,
+        task_objective: str,
+        task_category: str = "",
     ) -> GroundingHarnessResult:
-        """VLM locate - uses task context when available for disambiguation."""
+        """VLM/UGround/VisionTRM/AnorhaTRM locate - uses task context when available for disambiguation."""
+        if self.anorha_trm:
+            gr = self.anorha_trm.locate(target, screenshot, task_category=task_category)
+            if gr.found:
+                return GroundingHarnessResult(
+                    found=True, x=gr.x, y=gr.y,
+                    confidence=gr.confidence, source="anorha_trm"
+                )
+        if self.vision_trm:
+            gr = self.vision_trm.locate(target, screenshot, task_category=task_category)
+            if gr.found:
+                return GroundingHarnessResult(
+                    found=True, x=gr.x, y=gr.y,
+                    confidence=gr.confidence, source="vision_trm"
+                )
+        if self.uground:
+            gr = self.uground.locate(target, screenshot)
+            if gr.found:
+                return GroundingHarnessResult(
+                    found=True, x=gr.x, y=gr.y,
+                    confidence=gr.confidence, source="uground"
+                )
         gr = self.vlm.locate(target, screenshot)
         if gr.found:
             return GroundingHarnessResult(

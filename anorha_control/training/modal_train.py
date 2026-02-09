@@ -1,6 +1,10 @@
 """
 Modal training script for cloud GPU training.
-Exports training job to Modal for A100/H100 GPU usage.
+Uses real TrajectoryTRM + TrajectoryDataset from trm_training.
+
+Usage:
+  modal run anorha_control.training.modal_train --data-path data/trajectories --epochs 50 --gpu T4
+  # Or mount locally: modal run -m anorha_control.training.modal_train --data-path ./data/trajectories
 """
 import modal
 import os
@@ -9,139 +13,176 @@ from pathlib import Path
 # Create Modal app
 app = modal.App("anorha-control-training")
 
-# Define GPU image with all dependencies
-image = modal.Image.debian_slim(python_version="3.11").pip_install(
-    "torch",
-    "torchvision", 
-    "timm",
-    "pillow",
-    "numpy",
-    "aiosqlite",
-    "tqdm",
+# Image with our package + deps (install from local or git)
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch",
+        "torchvision",
+        "timm",
+        "pillow",
+        "numpy",
+        "tqdm",
+    )
+    .copy_local_dir(".", remote_path="/app")
+    .pip_install("-e", "/app")
 )
-
 
 @app.function(
     image=image,
-    gpu="A100",  # Use A100 for fast training
-    timeout=3600,  # 1 hour max
+    gpu="T4",  # T4 fits $30 budget (~$0.59/hr); use A100 for speed
+    timeout=7200,  # 2 hours max
     secrets=[modal.Secret.from_name("wandb-secret")] if os.environ.get("WANDB_API_KEY") else [],
 )
 def train_trm(
-    data_path: str,
-    epochs: int = 100,
-    batch_size: int = 32,
+    data_path: str = "/app/data/trajectories",
+    epochs: int = 50,
+    batch_size: int = 64,
     learning_rate: float = 1e-4,
     checkpoint_path: str = None,
 ):
     """
-    Train TRM on Modal with A100 GPU.
-    
-    Args:
-        data_path: Path to training data (JSON or tar.gz)
-        epochs: Number of training epochs
-        batch_size: Batch size
-        learning_rate: Learning rate
-        checkpoint_path: Optional checkpoint to resume from
+    Train TrajectoryTRM (path smoothing) on Modal.
+    Uses real TRMTrainer + TrajectoryDataset; expects trajectory JSON format.
     """
+    import sys
+    sys.path.insert(0, "/app")
+    from anorha_control.training.trm_training import (
+        TRMTrainer,
+        TrainingConfig,
+        load_trajectory_trm,
+    )
+
     import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    from torch.utils.data import DataLoader, Dataset
-    import json
-    from tqdm import tqdm
-    
+    from pathlib import Path
+
     print(f"Training on {torch.cuda.get_device_name(0)}")
     print(f"Data: {data_path}")
     print(f"Epochs: {epochs}, Batch: {batch_size}, LR: {learning_rate}")
-    
-    # Load data
-    with open(data_path) as f:
-        experiences = json.load(f)
-    
-    print(f"Loaded {len(experiences)} experiences")
-    
-    # Create dataset
-    class ExperienceDataset(Dataset):
-        def __init__(self, experiences):
-            self.experiences = experiences
-        
-        def __len__(self):
-            return len(self.experiences)
-        
-        def __getitem__(self, idx):
-            exp = self.experiences[idx]
-            return {
-                "action_x": torch.tensor(exp["action_x"], dtype=torch.float32),
-                "action_y": torch.tensor(exp["action_y"], dtype=torch.float32),
-                "action_type": torch.tensor(exp["action_type"], dtype=torch.long),
-                "reward": torch.tensor(exp["reward"], dtype=torch.float32),
-            }
-    
-    dataset = ExperienceDataset(experiences)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    
-    # Simple model for demonstration (replace with actual TRM)
-    class SimpleTRM(nn.Module):
-        def __init__(self, hidden=256):
-            super().__init__()
-            self.encoder = nn.Sequential(
-                nn.Linear(256, hidden),
-                nn.GELU(),
-                nn.Linear(hidden, hidden),
-            )
-            self.coord_head = nn.Linear(hidden, 2)
-            self.action_head = nn.Linear(hidden, 5)
-        
-        def forward(self, x):
-            h = self.encoder(x)
-            coords = torch.sigmoid(self.coord_head(h))
-            actions = self.action_head(h)
-            return {"coords": coords, "action_type": actions}
-    
-    model = SimpleTRM().cuda()
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-    
-    # Training loop
-    best_loss = float("inf")
-    
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0
-        
-        for batch in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-            # Create dummy input (normally would be vision embeddings)
-            x = torch.randn(len(batch["action_x"]), 256).cuda()
-            
-            # Forward
-            output = model(x)
-            
-            # Losses
-            target_coords = torch.stack([batch["action_x"], batch["action_y"]], dim=1).cuda()
-            coord_loss = nn.MSELoss()(output["coords"], target_coords)
-            action_loss = nn.CrossEntropyLoss()(output["action_type"], batch["action_type"].cuda())
-            
-            # Weight by reward
-            reward = batch["reward"].cuda().unsqueeze(1)
-            loss = (coord_loss + action_loss) * reward.mean()
-            
-            # Backward
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            total_loss += loss.item()
-        
-        avg_loss = total_loss / len(dataloader)
-        print(f"Epoch {epoch+1}: Loss = {avg_loss:.4f}")
-        
-        # Save best model
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-            torch.save(model.state_dict(), "/tmp/best_model.pt")
-    
-    print(f"Training complete! Best loss: {best_loss:.4f}")
-    return {"best_loss": best_loss, "epochs": epochs}
+
+    cfg = TrainingConfig(
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        epochs=epochs,
+        device="cuda",
+    )
+    trainer = TRMTrainer(cfg)
+    history = trainer.train(data_path, val_path=None, epochs=epochs)
+    out_path = "/tmp/trm_trajectory.pt"
+    trainer.save(out_path)
+    print(f"Saved to {out_path}")
+    return {"best_loss": trainer.best_loss, "epochs": epochs, "history": history}
+
+
+@app.function(
+    image=image,
+    gpu="T4",
+    timeout=7200,
+    secrets=[modal.Secret.from_name("wandb-secret")] if os.environ.get("WANDB_API_KEY") else [],
+)
+def train_anorha_trm(
+    data_path: str = "/app/data/trajectories",
+    epochs: int = 100,
+    batch_size: int = 32,
+    learning_rate: float = 2e-4,
+):
+    """
+    Train AnorhaTRM (grounding + trajectory) on Modal.
+    Requires trajectories with screenshot_path, target_label, and trajectory sequences.
+    """
+    import sys
+    sys.path.insert(0, "/app")
+    from pathlib import Path
+    from anorha_control.training.unified_trm import (
+        UnifiedTRMTrainer,
+        UnifiedConfig,
+        UnifiedDataset,
+    )
+
+    import torch
+
+    print(f"Training on {torch.cuda.get_device_name(0)}")
+    print(f"Data: {data_path}")
+    print(f"Epochs: {epochs}, Batch: {batch_size}, LR: {learning_rate}")
+
+    p = Path(data_path)
+    data_dir = p if p.is_dir() else p.parent
+
+    config = UnifiedConfig(
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        epochs=epochs,
+        device="cuda",
+    )
+    dataset = UnifiedDataset(data_path, config, data_dir=data_dir)
+    if len(dataset.grounding_dataset) == 0 or len(dataset.trajectory_dataset) == 0:
+        raise ValueError(
+            "Need both grounding and trajectory data. Run gatherer with --save-screenshots."
+        )
+    trainer = UnifiedTRMTrainer(config, dataset.get_char_vocab_size())
+    history, dataset = trainer.train(data_path, data_dir=data_dir, epochs=epochs)
+    out_path = "/tmp/anorha_trm_best.pt"
+    trainer.save(out_path, dataset.get_char_to_idx())
+    print(f"Saved to {out_path}")
+    return {"best_loss": trainer.best_loss, "epochs": epochs, "history": history}
+
+
+@app.function(
+    image=image,
+    gpu="T4",
+    timeout=7200,
+    secrets=[modal.Secret.from_name("wandb-secret")] if os.environ.get("WANDB_API_KEY") else [],
+)
+def train_vision_trm(
+    data_path: str = "/app/data/trajectories",
+    epochs: int = 50,
+    batch_size: int = 16,
+    learning_rate: float = 3e-4,
+):
+    """
+    Train VisionTRM (grounding only) on Modal.
+    Requires trajectories with screenshot_path and target_label.
+    """
+    import sys
+    sys.path.insert(0, "/app")
+    from pathlib import Path
+    from anorha_control.training.vision_trm_training import (
+        VisionTRMTrainer,
+        VisionTRMConfig,
+        VisionGroundingDataset,
+    )
+
+    import torch
+
+    print(f"Training on {torch.cuda.get_device_name(0)}")
+    print(f"Data: {data_path}")
+    print(f"Epochs: {epochs}, Batch: {batch_size}, LR: {learning_rate}")
+
+    p = Path(data_path)
+    data_dir = p if p.is_dir() else p.parent
+
+    config = VisionTRMConfig(
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        epochs=epochs,
+        device="cuda",
+    )
+    dataset = VisionGroundingDataset(
+        data_path,
+        data_dir=data_dir,
+        img_size=config.img_size,
+        max_label_len=config.max_label_len,
+    )
+    if len(dataset) == 0:
+        raise ValueError(
+            "No grounding samples. Run gatherer with --save-screenshots first."
+        )
+    trainer = VisionTRMTrainer(config, dataset.get_char_vocab_size())
+    history, dataset = trainer.train(data_path, data_dir=data_dir, epochs=epochs)
+    out_path = "/tmp/vision_trm_best.pt"
+    trainer.save(out_path, dataset.get_char_to_idx())
+    print(f"Saved to {out_path}")
+    return {"best_loss": trainer.best_loss, "epochs": epochs, "history": history}
 
 
 @app.function(image=image, gpu="A100", timeout=7200)
@@ -272,20 +313,39 @@ def train_with_maml(
 
 @app.local_entrypoint()
 def main(
-    data_path: str,
-    epochs: int = 100,
+    data_path: str = "/app/data/trajectories",
+    epochs: int = 50,
+    model: str = "anorha_trm",
     maml: bool = False,
+    gpu: str = "T4",
 ):
     """
     Local entrypoint for Modal training.
-    
-    Usage:
-        modal run modal_train.py --data-path data/export.json --epochs 100
-        modal run modal_train.py --data-path data/export.json --maml  # For MAML
+
+    Usage (run from project root with data/trajectories/):
+        modal run anorha_control.training.modal_train --model anorha_trm --epochs 100
+        modal run anorha_control.training.modal_train --model vision_trm --epochs 50
+        modal run anorha_control.training.modal_train --model trm --epochs 50
     """
+    # Resolve data path for container (copy_local_dir puts project at /app)
+    if not data_path.startswith("/"):
+        data_path = f"/app/{data_path}"
+
     if maml:
         result = train_with_maml.remote(data_path=data_path, epochs=epochs)
-    else:
+    elif model == "anorha_trm":
+        result = train_anorha_trm.remote(
+            data_path=data_path,
+            epochs=epochs,
+        )
+    elif model == "vision_trm":
+        result = train_vision_trm.remote(
+            data_path=data_path,
+            epochs=epochs,
+        )
+    elif model == "trm":
         result = train_trm.remote(data_path=data_path, epochs=epochs)
-    
+    else:
+        raise ValueError(f"Unknown model: {model}. Use anorha_trm, vision_trm, or trm.")
+
     print(f"Training complete: {result}")

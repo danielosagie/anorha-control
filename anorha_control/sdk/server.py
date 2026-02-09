@@ -1,9 +1,12 @@
 """
 Anorha SDK Server - HTTP API wrapping ComputerAgent for LLM tool use.
+
+Set ANORHA_TRM_CHECKPOINT to enable AnorhaTRM grounding (e.g. checkpoints/anorha_trm_best.pt).
 """
 import asyncio
 import base64
 import io
+import os
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -52,11 +55,13 @@ async def lifespan(app: FastAPI):
     async def screenshot_fn():
         return await _backend.screenshot()
     
+    anorha_trm_checkpoint = os.environ.get("ANORHA_TRM_CHECKPOINT", "").strip()
     config = AgentConfig(
         vlm_model="moondream",
         verify_actions=False,
         viewport_width=1280,
         viewport_height=800,
+        anorha_trm_checkpoint=anorha_trm_checkpoint or None,
     )
     _agent = ComputerAgent(config, page=_backend.page, screenshot_fn=screenshot_fn)
     yield
@@ -148,4 +153,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8765):
 
 
 if __name__ == "__main__":
-    run_server()
+    import argparse
+    parser = argparse.ArgumentParser(description="Anorha SDK Server")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
+    parser.add_argument("--port", type=int, default=8765, help="Port to bind")
+    parser.add_argument(
+        "--anorha-trm-checkpoint",
+        default=os.environ.get("ANORHA_TRM_CHECKPOINT", ""),
+        help="Path to AnorhaTRM checkpoint (or set ANORHA_TRM_CHECKPOINT)",
+    )
+    args = parser.parse_args()
+    if args.anorha_trm_checkpoint:
+        os.environ["ANORHA_TRM_CHECKPOINT"] = args.anorha_trm_checkpoint
+    run_server(host=args.host, port=args.port)

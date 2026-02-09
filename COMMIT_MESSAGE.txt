@@ -1,0 +1,27 @@
+feat: Add passive recording for real-world trajectory data collection
+
+Add passive_recorder.py module that captures mouse movements and clicks
+during normal computer use, converting them into TRM training data without
+requiring synthetic task execution.
+
+Features:
+- Background recording using pynput.mouse.Listener
+- Position buffering at ~60Hz (configurable via --min-interval-ms)
+- Trajectory segmentation from last click to current click
+- Savitzky-Golay smoothing to reduce noise while preserving shape
+- Quality filtering (discards trajectories with excessive direction reversals)
+- Optional screenshot capture for Vision TRM training
+- Outputs TrajectoryData format compatible with existing training pipeline
+
+Benefits:
+- Collect hundreds to thousands of trajectories from days of normal use
+- More diverse, human-like movement patterns than synthetic easing curves
+- Zero effort - runs in background while user works normally
+- Complements VLM-guided data gathering for better trajectory diversity
+
+Usage:
+  uv run python -m anorha_control.exploration.passive_recorder
+  uv run python -m anorha_control.exploration.passive_recorder --screenshots
+
+Output files are saved to data/trajectories/passive_trajectories_*.json and
+automatically merged with existing trajectory data during training.

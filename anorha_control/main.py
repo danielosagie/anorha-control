@@ -320,6 +320,12 @@ def main():
     gather_parser.add_argument("--gpu", action="store_true", help="Enable GPU acceleration for OCR/Post-processing and VLM")
     gather_parser.add_argument("--start-server", action="store_true", help="Start llama.cpp server with GPU if not running (--llamacpp only)")
     gather_parser.add_argument("--fast-vlm", action="store_true", help="Resize images for VLM (768x480) - speeds up when vision encoder is on CPU")
+    gather_parser.add_argument("--grounding", type=str, default="vlm", choices=["vlm", "uground", "vision_trm", "anorha_trm"],
+                        help="Grounding: vlm | uground | vision_trm | anorha_trm (unified)")
+    gather_parser.add_argument("--anorha-trm-checkpoint", type=str, default="checkpoints/anorha_trm_best.pt",
+                        help="Path to Anorha TRM checkpoint (for --grounding anorha_trm)")
+    gather_parser.add_argument("--save-screenshots", action="store_true",
+                        help="Save screenshots for Vision/Anorha TRM training")
     
     # SDK server command (LLM tool use)
     sdk_parser = subparsers.add_parser("sdk", help="Run Anorha SDK server for LLM tool use")
@@ -423,6 +429,9 @@ async def run_gather(args):
         max_difficulty=difficulty_map.get(args.difficulty, Difficulty.MEDIUM),
         use_gpu=getattr(args, 'gpu', False),
         vlm_image_max_size=(768, 480) if getattr(args, 'fast_vlm', False) else None,
+        grounding_model=getattr(args, 'grounding', 'vlm'),
+        anorha_trm_checkpoint=getattr(args, 'anorha_trm_checkpoint', 'checkpoints/anorha_trm_best.pt'),
+        save_screenshots=getattr(args, 'save_screenshots', False),
     )
     
     print(f"\nConfiguration:")

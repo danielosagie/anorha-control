@@ -351,30 +351,52 @@ class TextReader:
         self.reader = None
         if EASYOCR_AVAILABLE:
             try:
-                self.reader = easyocr.Reader(['en'], gpu=use_gpu)
-                print("[TextReader] Using EasyOCR")
+                import torch
+                gpu_ok = use_gpu and torch.cuda.is_available()
+                self.reader = easyocr.Reader(['en'], gpu=gpu_ok)
+                print(f"[TextReader] Using EasyOCR (gpu={gpu_ok})")
             except Exception as e:
                 print(f"[TextReader] EasyOCR init failed: {e}")
     
+    def _preprocess_for_ocr(self, screenshot: Image.Image) -> Tuple[Image.Image, float]:
+        """
+        Preprocess small images for better OCR at low resolution.
+        Upscales if max dimension < 800. Returns (image, scale_back) for bbox conversion.
+        """
+        w, h = screenshot.size
+        min_dim_for_ocr = 800
+        if max(w, h) >= min_dim_for_ocr:
+            return screenshot, 1.0
+        scale = min_dim_for_ocr / max(w, h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        upscaled = screenshot.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        return upscaled, 1.0 / scale  # scale_back: upscaled coord -> original
+
     def extract(self, screenshot: Image.Image) -> List[OCRResult]:
         """
         Extract all visible text from screenshot.
+        Preprocesses small images (upscale < 800px) for better low-res text recognition.
         
         Returns:
-            List of OCRResult with text and bounding boxes
+            List of OCRResult with text and bounding boxes (in original image coords)
         """
         if self.reader is None:
             return []
         
         import numpy as np
-        img_array = np.array(screenshot)
+        img_prep, scale_back = self._preprocess_for_ocr(screenshot)
+        img_array = np.array(img_prep)
         
         try:
             results = self.reader.readtext(img_array)
             return [
                 OCRResult(
                     text=text,
-                    bbox=(int(bbox[0][0]), int(bbox[0][1]), int(bbox[2][0]), int(bbox[2][1])),
+                    bbox=(
+                        int(bbox[0][0] * scale_back), int(bbox[0][1] * scale_back),
+                        int(bbox[2][0] * scale_back), int(bbox[2][1] * scale_back),
+                    ),
                     confidence=conf
                 )
                 for bbox, text, conf in results
@@ -550,7 +572,7 @@ class ActionPlanner:
             examples = '[{"action":"click","target":"visible button or link","value":""}]'
         prompt = f"""Task: {task}{data_line}{context_block}
 
-Output 2-5 steps as JSON array. Each step: action, target, value.
+Output 3-5 steps as JSON array (chain-of-action: plan several steps at once). Each step: action, target, value.
 target = EXACT visible text on the element (button label, link text, folder name). Use ONLY what you literally see on screen—no guesses.
 value = for type/search: the ACTUAL text to type (e.g. "Tokyo" for "Find population of Tokyo", NOT the word "Search").
 For search: target=search box, value=search query (what to search for).
@@ -617,6 +639,17 @@ Output JSON array only:"""
                     steps = obj["steps"]
                     return [s for s in (steps if isinstance(steps, list) else []) if self._valid_step(s)]
                 if "action" in obj:
+                    act = obj["action"]
+                    # Malformed: {"action":["Click to start",...]} or {"action":["type","submit",...]}
+                    if isinstance(act, list) and act:
+                        first = next(
+                            (s for s in act if isinstance(s, str) and s.strip()
+                             and s.strip().lower() not in ("type", "click", "press_enter")),
+                            act[0] if isinstance(act[0], str) else None,
+                        )
+                        if first:
+                            target = first.strip() if isinstance(first, str) else str(first)
+                            return [{"action": "click", "target": target, "value": ""}]
                     return [obj]
             # Fallback: find array with bracket matching (avoids ] inside strings)
             return self._extract_steps_fallback(response)

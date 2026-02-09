@@ -1,0 +1,377 @@
+Hey there, this is Constantine with India. If you're watching this, then you've probably heard about the hierarchical reasoning model, a paper
+that got a lot of attention online recently. We got very interested in it as well because it performs well on
+RKGI, the main benchmark that we're interested in, and uh we found some interesting things. So, we decided we
+wanted to share it as well. So, the main motivation of that work is to work towards reasoning. And they state that
+to get to reasoning uh what reasoning basically is is devising and executing complex goal oriented action sequences.
+So they define reasoning as a sequences of actions that are on a division level
+and on an execution level towards a specific goal. To get there they take
+inspiration from the brain in two ways. The first is that the brain uh processes signals at different frequencies.
+There's some areas in the brain that operate at lower frequencies sort of more slowly and some areas in the brain
+that operate at faster frequencies so sort of more fast at higher frequencies.
+Uh but these two influence each other. So the lower frequencies sort of guide the the faster thinking of the faster
+frequency higher frequency areas and the output of the higher frequency thinking processes also influence the lower
+frequency the slower thinking uh kind of processes and so they thought that was interesting. The other component of the
+brain that they take inspiration from is recurrence. So basically uh reasoning specifically is not just a forward pass
+sort of you get input you think a bit and then you have your reasoning trace. They claim there's recurrence in the brain. So you sort of iterate and refine
+as you go along. The main gap that they identify in previous work that they want to address
+is chain of thought kind of work. Um they say that it suffers from virtual task decomposition and high data and
+compute requirements. The other sort of less outspoken goal is that transformers don't scale well. Specifically, they
+don't scale well in low data regimes, which is what the ARC AGI benchmark is all about, right? This like very small
+amount of samples per task, very complex, very hard for deep learning methods to do. So on this kind of a
+domain, transformers don't scale well. And so want to address that. So we'll take a look at the methods.
+We'll take a look at the main results and then we'll dive a bit deeper and try to understand what makes this method
+work. Um here are the links to the papers and to the code as well their code and we'll also have our codes with
+the experiments that we've done. All right. So the method has basically
+five components to it. At least the way I see it. Uh the first one is this iterative refinement, right? Taking the
+exploration of the recurrence in the brain. They want to refine processes as they go along. Basically make a
+prediction. You don't stop there. You refine it until you're okay with it. This refinement happens on three levels.
+There's an outer refinement loop and two levels of an inner loop that are hierarchical. The general refinement is
+given a context and an initial guess. refine until you reach equilibrium or you're happy with it. The second
+component to all of the HRM model is the actual hierarchical model. This notion of a lower and a higher frequency in the
+forward passes, which basically means one component is called more often, the other component is called less often. So
+updates in one are faster or more frequent and updates in the other are slower, less frequent.
+In the outer refinement loop, they also have a learned hold signal which they call adaptive compute. basically learn
+the model to control the amount of refinement steps, the amount of time it takes to solve a specific task.
+Uh next component is the usage of task embeddings. So usually in problems like
+arc where you try from a set of training input and output pairs try to understand
+what the transformation from input to output is that describes this particular task this particular set of input output
+pairs. You have training examples where you have access to the input output pairs and you have a test example where
+you only have the input and you're supposed to make the prediction to the output. So GPT3 style for these kind of
+tasks is you show the training example and you ask them all to make a prediction for the test example given
+that it has the fusion context of the training examples. They decide not to do that. Instead they provide task
+embeddings where the task ID tells the model what the transformation is that's supposed to do. Quite an interesting
+choice. And then they also use data augmentations the common you know computer vision data augmentations um
+both to increase data set size for training but also at inference time so that they have basically several
+predictions across different augmentations so they can do majority voting on it. Quite interesting
+at a 10,000 ft level. This is what the entire approach looks like. Um so
+there's an auto loop around in the center is the HRM model. Basically, if you start with a new task, you feed it
+into what they call a task carry that contains the actual task data, the input grid, and the task ID, the unique
+identifier that tells the model what task, what transformation is supposed to work on right now. This task carry also
+contains the number of steps that this task has already taken, if you start at zero, and whether or not it's done with
+it, which they call halted. And it also contains the embeddings for the lower level and higher level hierarchical
+modules. So two types of embeddings, L embeddings, H embeddings. We'll keep talking about these. In the beginning,
+they are just randomly initialized. You feed all of this to your HRM model and on a very high level, it does
+something with it. Uh what it predicts is an output for this input. So input output pairs. It gets the input. It
+predicts the output from the input and this ID. It also predicts whether or not it's done. So altered yes or no as well
+as an update to this L&H embeddings. So these are fed in and they also come out
+in a refined version. And so the auto loop is basically unless I'm done or I've reached the maximum amount of steps
+that I'm allowed to take, I keep going. So this data here, the L and H embeddings, they override these and then
+I just keep going. I just keep iterating over this until the halted signal is yes. So I've reached the maximum amount
+of steps. That's the outer refinement. The HR model has two main components.
+That's the L module and the H module. And what comes into the entire HI model
+are the inputs that are fed into some embedding module. We'll look at that too. So we have embeddings of the
+inputs. We have the ingoing H embeddings and the ingoing H L embeddings. And what
+this does is basically updating the L and H embeddings sort of iteratively
+until it finally comes to a prediction for the entire input. So first it
+updates the L embeddings by forward propagating the L embeddings and the current H embeddings to the L module.
+And with each L module call, it updates only the L embeddings. So this happens N times and L times. And then with these
+updated L embeddings, it also updates the H embeddings by passing both new L
+and original H embedings to the H module, right? And then we have a new H embedding. And then we do the same thing
+again with that new H embedding. we pass several times to the L module again to update the L embeddings a few times. You
+get the gist. So you basically with a specific L H embeddings, you update the L embeddings a few times. That's the
+faster pace thinking. And once you've done that, you also update the slower
+module, the H module by updating the H embeddings. Now the clue here is all
+these iterations happen without gradients. So this is just updating the latent state these embeddings, the HNL
+embeddings. Once you've done that, once you're done with your hierarchical iterations over H and L where the H
+module is supposed to be the slower guidance signal and the L module is supposed to be the faster thinking
+signal. Then you do a final forward pass through both of these again. The H module takes the current state of HML
+which is updated after the L module but this time you do that with the gradients. So in code this looks like so
+you iterate over this these loops through L and then also through H without gradients and then you take a
+final forward pass through your ln net to update the L state through your H net to update the H state and that final H
+state is what you feed to a head and that head gives you a final prediction right so iteratively refining towards
+equilibrium um by sort of calling L a few times and then calling H L a few times page and then doing a final
+forward fast for a prediction. In my own sketchy drawing, it's like this. It's
+the same thing. It's just a different way. Maybe it helps some of you. You get some input embeddings from your
+embedding module. You have few in H&L embeddings. You do this in a loop step without gradients. That's these
+iterations, the hierarchical iterations. You get a new H state and a new L state or H embeddings L embeddings. With all
+of this, you do a final forward pass L transformer. You get a new L state. again final forward pass to the H level
+transformer a new H state again and from that last Z H the last H embeddings and
+you feed those to LL LM head and a Q head the LM head gives you the final output prediction so from that input
+what is the predicted output the Q head gives you basically the halting signal am I done am I not done so yeah there's
+a lot going on but really it's just processing uh the input and some updating some HL embeddings to get this
+final prediction now interestingly These are not just wasted, right? Because you do this out of loop because you might be
+wondering like why am I not throwing this away at this point? I'm done with it, right? You you actually keep these
+as well and you feed them in the next iteration like back in here again.
+Okay. So, one more finer point that I wanted to make here is uh these embedding layers because they think
+they're particular and I think they make a have an impact on the model performance as well. So, I mentioned this up top. Commonly for this kind of a
+problem, the models see context, other examples for input output pairs that
+describe this particular transformation and then an input and ask the model to understand what the from the context
+what the transformation is and then to apply it on this input. Like I mentioned before, they decided
+not to do that. So the input to the model is literally just one input example. So one grid they p it to 30 by
+30 and then flapnet. So it's a sequence of 900 is basically color values and
+then they also feed this puzzle identifier and the puzzle identifier is composed of the unique task ID. So all
+input output pairs of this task share this ID because it's the ID of the same task but also what transformation and
+what color mapping have been applied to this particular version of this particular task because they apply
+augmentations right if you change the color then the task is changed. So they encode this is in this puzzle
+identifier. This puzzle identifier describes uniquely what specific task
+this input example belongs to. They feed the the flattened color array
+to just a regular embedding layer. So you know the 10 different color values used in ARC. So it's basically one hot
+encoding each of these into like a 10 by hidden dim embedding layer. So what you
+get from this is basically a 900 by hidden dem array that comes out of it. So so far so straightforward. But the
+same applies for the puzzle embedding layer as well. So basically you have just not 10 you have like a large amount
+of different unique puzzle identifiers that you also again want to encode and feed to a puzzle embedding layer. This
+is quite big because the number of unique hashes that you have to understand or like that the model has to
+understand is the number of tasks that it can see these unique task IDs times the number of augmentations that you've
+applied per task. And this can get quite big and crucially this puzzle embedding
+layer the output of it or basically the puzzle identifier this is the only information the model gets on what to do
+with this input right several inputs but the same input could belong to several tasks. So there's no unique information
+in the input of what to do with it. So to understand what to do with this input to predict the output, the model has to
+rely on this particular puzzle identifier. It's the only information that it gets. And as a consequence,
+because this is an embedding layer, right? It's fixed. It has this fixed uh amount of rows. You can probably extend
+it somehow, but generally it's it's a fixed size. And each row in it has a specific fixed meaning to it because it
+belongs to a fixed puzzle identifier. This model can only work on puzzle identifiers it has seen at training
+time, right? There's no way of like feeding in a new task with a new puzzle identifier and then trying to make an
+inference of it. The model wouldn't know what to do with it because it hasn't seen it at training time.
+Okay, taking a step back, HRM has an auto refinement loop that tries to propose a solution, understand when it's
+done, and refine what it's not. an inner equilibrium loop that does this hierarchical component that refineses
+towards equilibrium when H and L level kind of agree with themselves and it uses puzzle embeddings sort of as
+a way to learn how to associate a puzzle hash with a specific transformation. So it knows what to do with an input to
+arrive at the output. The way training is done has two components. It's a prediction loss and a
+Q-learning loss. Input output, we've just seen this, right? The input is just the input grid and the puzzle identifier. The output is the prediction
+for this input and puzzle identifier as well as the halting or continue signal.
+Um the prediction loss trains for the output. It's just a supervised classification on a per token level. So
+for every token it tries to encourage the model to make the correct prediction cross entropy very standard.
+Uh the Q-learning loss tries to learn this halting signal. It's also binary cross entropy um on both the halting as
+well as the continue value. So it assigns two values to each possible state. Possible action action one is
+halt. Action two is continue. The halting target is basically well it's one if and only if your current
+prediction is correct actually and it's zero otherwise and the continue signal is well it's either the hold signal of
+the next steps if the next step is the last step or it's the maximum overhaul and continue of the next step. So fairly
+straightforward. Yeah, this looks complicated really not. And this also just very straightforward. So training
+is very straightforward which is nice for inference. It's also interesting
+because I think I already mentioned this as well up top. They use all the different augmented versions of the
+individual inputs that they have that they want to make inference for. So they don't just take the actual original one.
+They take the original and all augmented version of the same inputs and they make predictions for all of them separately.
+So if you look at the figure here, if that was your original input, you could rotate it, you could mirror it, you
+could recolor it, you would get three different versions. You could make an inference for all of them, right? Because you know your model has learned
+to deal with all of them. And then you would arrive at different predictions for the same task. And you can use the
+fact that these augmentations, these transformations, they're invertible. So you can map them back to the original
+task version basically. And then you have different predictions for the same task which is kind of neat uh because
+then you can basically check is there one that comes up more often and that's exactly what they do. They use majority
+boarding on this pool of predictions with the same model. Very very neat. Uh one last note at training time they use
+this Q-learning signal this sort of halting signal but at inference times they do not. So at inference time they
+just always use the maximum number of auto refinement step. Uh this AC is disabled.
+Okay, time for some results. Um, top level numbers on RQ1. The public score
+is 41%, we've reproduced these. These check out the semi-private score on the
+semi-private data set is 32% passet 2. So on V1, this puts the HRM model right
+about here on the landscape. It's a neighborhood of cloud opus 4 in thinking 16k steps. fairly performant
+particularly given the fact that it only trains on the actual AR data. There's no other pre-training going on. The cost
+per task comes out at relatively high but again this is because the model is actually trained. There's no
+pre-training going on. It's just starts from random initialization. On V2 the public score is 4% and the
+semi-private score is 2%. And that sort of checks up with the numbers that they
+put in the paper. So this is ARC AGI V1 V2 uh they claim 40.3 so our numbers are
+a bit above that for V1 and they claim 5.0 zero our numbers are below that there's a bit of noise as to be
+expected. So the the claim that the performance claim that they have in the paper is legit that their method works really well.
+Um next plot that they use in the paper which I thought was interesting both are concerned with scaling of models to the
+left it's accuracy on sudokqu extreme full by scaling a transformer in parameters
+this time. So on the gray curve to the bottom basically making the transformer bigger you can tell that it doesn't
+really do anything if you scale it in width. So the depth as the transform remains the same just every layer gets a
+bit wider but if you do scale the depth so if you increase sort of the thinking steps the amount of refinement that you
+do by going deeper you do actually benefit in performance.
+The right plot is something very similar only it's not the parameters on the x-axis it's the depth. So the amount of
+transformer layers that you go through in a sense, right? Because you can do that with the same curve as here. It's
+actually the same curve even though it's not the same x-axis comes out the same because here if you add a layer to the
+right then you also add parameters to the left because that's the only way a regular transformer can sort of get deeper. But at some point it plateaus
+right uh here too. But you can sort of feed the output of the transform back into the transformer. At that point you
+don't add more parameters. This is the same size model but it computes more. It's this sort of refinement loop. If
+you do that with a recurrent transformer, this is the layer they show you have a higher peak. You can compute
+deeper without plateauing and their model sort of comes up up here. So the claim that they make with that figure is
+compute depth helps you. But regular models can't do it and their model can do it.
+Last plot on this line of thinking is well trying to make a case for why the
+hierarchical component is is relevant and matters and it should be there. Yeah, there's a lot going on. Well, I'll try to unfold it a bit at least how I
+understand it. So on the y- axis is forward residual on the x-axis is step and they make the argument that
+recurrent neural networks regular recurrent neural networks as they do their refinement steps they collapse. So they very very quickly reach equilibrium
+and not much is going on anymore. So you can do refinement, you can do thinking steps, but after a few thinking steps,
+you basically don't benefit from it anymore. Deep neural nets on the other hand, notice that the x-axis is like way
+way higher than the step index here. They go off rails at some point. So
+while it does work to a certain degree, at some point there's just explosion of something and that's not good either.
+And then their model is sort of nicely tuned in between because they have this H and L level forward residual. the H
+level the lower frequency higher level thinking kind of module it goes down slowly and the L level so in this
+iterations where each of these steps is when the H level is updated it goes down
+slower so you can do more thinking steps before you reach equilibrium and you don't update any that's their case for why the hierarchy is good and then
+there's some other than the top level numbers there's some interesting qualitative results in the paper as well where they look at basically the time
+steps the auto refinement steps what happens to the output This is a maze where we can basically see how the trace
+of going from one spot to the other spot evolves until it sort of converges actually continues. There's a gap here.
+It's gone there. Same for arc where this is one of the input output examples for
+one task and this is how it evolves for this test input transforming it into the
+correct test output. Right? Note again that this is how you would commonly see this. You would give context and then
+give this test input. Ask it to arrive here. But again they don't show this. They just show the embedding of this
+puzzle identifier. Okay. So it does work. It does reach
+high performance metrics on V1 specifically RKGI V1. So we wanted to
+understand why there's a lot going on. What component of this drives the performance. So we identified a few
+candidates. It could be the model architecture this HRM architecture with the hierarchical refinement. It could be
+the inner refinement loop. the priorization of this. It could be the auto refinement loop and this auto loop
+with or without the act this halting signal. It could be the data oration because in the paper they use a thousand
+orations per task which seems a lot but it could also be the puzzle embings and so in the coming slides I'll just
+basically walk through each of them and try to test try to get closer to see what is it.
+First off, the architecture. Basically, does the HRM model matter in in trying to reach the performance level that they
+reach? To get close to that, we compare the HRM model architecture. We replace
+the entire thing just with a regular transform. It's matched in parameter count. Their model has basically two
+transformers. The H level and L level, they are both transformers. We just replace both of these with just one, but
+same parameter overall parameter count. Uh we keep all of the rest of the training pipeline the same. So they also
+use the same inputs, the same outputs, makes the same predictions gets called in the alpha refinement loop. So it's
+really just the HRM model that's gets replaced and we keep all of the rest of
+the hyperparameters the same as well. So we didn't optimize at all. We just literally replace the architecture. One
+note here is that this transformer has the same parameters but it has less forward compute specifically because it
+doesn't do these sort of search refinement equilibrium steps um in the HRM model.
+So in the figure on the right the passet to score on arc agi v1 public um so it's
+reproducible over the number of refinement outer refinement loop steps
+so these act outer loop steps in blue are the hrm model scores and in orange
+is our so drop replacement with the transformer and these results are quite interesting because this unoptimized
+transformer always reaches within approximately 5% of the hrm model there's a bit of variance for one loop
+they're basically the same for two loops the H model pulls away a bit and then as we go up in more outer refinement loop
+steps the gap closes a bit we don't know if it would close all the way we haven't
+run that experiment but it it does seem to close a bit also note that in these numbers there's a bit of noise so it
+could be a bit smaller could be a bit bigger the gap and that's interesting because that seems to tell us that it's not the hi
+module that explains most of the performance it does give a little bit a boost at least in the more outloop steps
+but it's not the main driver for the performance at least on arc okay so if it's not the architecture is it maybe
+the inner loop that does make a difference we basically in this case keep the HRM architecture and vary the
+number of cycles L and H cycles in their paper they use both two and so we varied
+to 11 one 44 we also tried to do 88 and then run different variations we stopped
+that at some point because 11 one already reach uh 78 of the performance so it's within and 4% of the 22 cycle.
+So it again doesn't seem to make a huge difference. And then as you increase the number of these iterations, your compute
+cost goes up. So uh 22 is already four times as expensive in runtime as 1 one
+and it just keeps exploding. We had to kill this job here just because it was too slow. It also doesn't really seem to
+to matter that much. So in our hunt on understanding what matters, we just had to look elsewhere. And the next thing we
+looked at and had already kind of showed on two slides ago is the outer refinement loop and potentially the act.
+Does the outer refinement loop matter? We tested that by varying the max outer steps at training time. But in their
+baseline setup that also varies the amount of outer loop steps at inference time. So if you set it to one, then
+you'll do one step at training time and one step at inference time. If you set it to four, you'll do four maximum four
+steps at training time and always four steps at inference time. In the figure at top is both of these together, right?
+Again, pass two on ARC AGI v1 over the HRM model set with max steps 1 2 4 8 16
+with ACT with this adaptive compute enabled or without 16 without. And as
+you can tell, going from one loop, which is basically no refinement, to two loops, which is one refinement steps.
+You make a prediction and you get to change it once, gets you from 19% to
+32%. So a 13% jump in just one refinement step. And going from no
+refinement to 16 steps or eight steps gets you to around 38 to 39%. Again,
+there's like noise in it. Sometimes it's 40, sometimes it's 41, sometimes it's 39. So it's basically twice the
+performance on passet 2 and our hi v1. So these refinement steps make a huge
+difference whereas the architecture and the hierarchy and doo did not make a difference not at least to that degree.
+The second component that is interesting is this halting signal. It does make a difference but it's a very small one.
+Right? So on act 16 loops so 16 outer refinement loops max with act enabled
+versus 16 outer loops with act disabled at least at training time the gap is around 3%. So again there's a difference
+but it's not huge. The thing that really does seem to matter is that you do refinements. It doesn't matter that much
+if you control the compute that you actually invest in it. The refinement itself is a state loop
+that matters here. Right? The next thing that we looked at is here again in their baseline settings
+the uh refinement loop steps are the same for training and inference. Right? So if I can take four maximum steps at
+training I also take four at inference. And we want to understand are these refinement steps more important at
+training time or more important at inference time. Right? because there's a case to be made that you maybe just
+train on a few refinement steps but that at inference time you really want to spend the compute there and
+interestingly that's not what we found. So here in this lower figure we compare two models two types of modules the blue
+ones are the same bars as up here. If it's one then it's one refinement steps at training time one refinement steps at
+inference time. If it's eight it's eight refinement steps at training time, eight refinement steps of at inference time. So blue means training and inference
+steps are the same. Orange bars are the module is trained with 16 refinement
+steps. So it's basically this bar here. And these two should be the same. There's noise which is why they're not
+the same. And then on the the x-axis value here describes how many refinement steps do I take just at inference times.
+So again all of these orange bars are trained with 16 refinement steps and then inference happens with 16 84 and
+one refinement steps. So we can compare basically what's the impact of using the
+same amount of refinement steps at inference time but training with different refinement steps. So here we
+compare two models that both use one refinement step so no refinement basically at inference time but this one
+has been trained with one refinement steps and this one has been trained with 16 refinement steps. And it's curious
+because what we see is there's a the smooth curve on training and refine and inference with the same amount of steps.
+And in orange, this curve is way flatter. So it does not suffer as much from using less compute at inference.
+Or in this example specifically, what this seems to show is if you train with
+refinement, you get better predictions without refinement. Right? Apparently, if you
+learn to like fix your errors, fix what it wasn't quite right in the previous iteration, your prediction is going to
+be better for it. So, you don't have to refine it even at all. That explains to me anyways this huge gap from training
+without refinement to training with refinement. But at inference time, not using refinement at all. But still, if
+you use refinement, you'll benefit a bit. There's like a bit of a boost still. So, yeah, a take-h home message from this slide. Refinement really makes
+a difference. It's this that drives the performance to the most part.
+The next component we looked at is the amount of data limitations. They use a thousand which seems like a lot
+specifically given that there are only about a thousand data samples in ARGI.
+So we want to understand is that necessary to what degree does it drive performance? Can we get away with less?
+Uh is it more important at training or is it more important at inference time? So we tried to vary the amount of data augmentations used which was a bit
+complicated because of the way the model is designed. Your model can only deal with augmentation. It has seen a
+training style right. So for training we can compile new data sets with a smaller amount of augmentations. That's not a
+problem. But at inference we can't go larger than that but we can go smaller
+than that. And the way we around to that is we still do inference with all the different augmented versions of the same
+puzzle, the same input output pair, but we randomly subsample from the
+prediction pool for majority voting. So we do majority voting not with all of the different versions but with a random
+subsample of it and that implicitly use less mutations, right? Okay. What this
+shows is the number of augmentations used at inference time on the x-axis on
+the y axis again passed to an arc agi v1 public and the colors are different
+models that are trained with different amounts of data augmentations right so the blue one here is a model that has
+been trained with 300 data augmentations and this curve that goes right down here is how does this blue model perform if
+you use less and less and less data augmentations starting at 300 100 and going down all the way to basically just
+one example. And so yeah, these are interesting effects because we see two things here. The first one is data
+augmentation clearly helps. So going from no data augmentation to using all the data augmentation, all the 1,00 that
+they use didn't go higher than that gives you a big jump from 15% if you
+actually train without the data augmentation. This thing that doesn't uh show up on the plot, it's actually 10%.
+Yeah, it makes a huge difference, right? So data augmentation help but what's interesting is that you don't need a
+thousand 1% of it. So 10 data augmentations which is this point here gets you about 75% of the effect. So you
+get about almost close to 30% of V1 compared to almost 40%. And if you use
+30 so 3% you get to almost 35. It's it's this magenta lines. So data mutations
+matter but you don't need all that much of them. That's take home one. Take home
+two is which is equally interesting I think as before the data optimizations
+seem to matter more at training time than they matter at inference time. So it's more important for your model to be
+trained on different augmented versions than to actually use all the different augmented versions so that you have a
+bigger prediction pool and your majority voting somehow becomes more stable. It's actually not the case. Right? Basically
+the curves that start further to the right. So the curves of models that have used more data augmentations at training
+time they are flatter. So as you use less and less and less and less data
+augmentation at inference time they lose performance but not as much. Whereas the curves that start further to the left
+they decrease most steeply. So this particular one the one that just uses 10 data augmentations it just goes way
+below. Right? Or we could just take this slice here just compare what what happens if I just use one example or
+what happens if I just use three examples here. We see that using the same amount of budget at inference time
+the amount of augmentations that I can use at inference time. Models that are trained with more data augmentation just
+perform better. Yeah, these are the two points. They help you need less than a
+thousand but you still need like some maybe 30 maybe 100. But you need them at training time. You don't need them as
+much as inference time. So inference could actually be cheaper because for every predictions that you're trying to make, make it a thousand times. It might
+be okay to just do 30 of them. Okay, the last component, the puzzle
+embeddings. This is a bit of an odd one. We were trying to figure out if we could do ablations on it. We weren't able to
+do it ourselves, but we were in close conversations with the authors of the
+paper who were incredibly gracious, very open, shared all the information they
+had. So kudos to them. What we learned from them and what we wanted to understand is what is the impact of the
+puzzle embeddings? The so what is the impact of the fact that they use well this hash of this is this task with this
+augmentation and this color mapping rather than showing the context of the other input output pairs of the same
+task. They told us that they had run this ablation in a previous version of their
+code that used the context of other input output pairs rather than the puzzle embeddings and it's not quite the
+same state of code. So there's probably some performance improvements elsewhere at the same time, but back then not
+using puzzle ids, not using this puzzle embeddings, but rather using the context, they achieved about 76% of per
+token accuracy. And we tried to triangulate a bit. So we tried to look at other models in this case ablations
+over the number of data augmentations that achieved similar performance. So, as you can tell, all of the bigger
+models at the end of training, they achieve well over 86% per token
+accuracy. But there's one model that early in training is maybe close to like 76%. It's, you know, let's say around
+78% of all accuracy of per token accuracy. And if we look down where that
+comes out at passet to performance on public evil, that's well below 10%. So,
+if we're generous and we say it's like around 10%. That's a huge draw from not using puzzle embeddings showing the
+context below 10% or around 10% maybe triangulated this is a guess right this is not hard science this is trying to
+get a signal to using the puzzle embeddings so that's very very interesting and we have a few candidates
+for potential explanations that we haven't tested at all this is just basically sharing guesses sharing
+potential leads for further experimentations um but yeah there are several candidates
+of why this might make such a The first one is the transformer gets a specific length of sequence that it has to deal
+with. The bigger that gets, the harder it is to learn anything from it. It's just more data to crunch through. That
+sequence length right now is 900 plus the puzzle embedding. If you were to give it 900 and then 900 for every other
+input and output of the task, that sequence is just way longer if you give context rather than puzzle embeddings. So using puzzle embodings has a shorter
+sequence might be easier to learn. The second thing is that puzzle ID gives
+you an extremely condensed signal. It's basically it's this task, right? Whereas
+if you have to extract that same signal from context, it's there, but you have
+to extract it. It's not as condensed. And as a consequence, it might just be significantly easier to learn how to
+deal with a puzzle embedding than to learn how to extract the same information from context. And that just
+may explain why it trains so well specifically on low regimes because
+that's the other information that we got from the authors as well which I thought was extremely interesting. they have run the same sort of ablation but on arc
+like data sets with a lot more training data and in this these other regimes
+same complexity but significantly more data uh showing context and then asking
+to solve a specific task the usual future learning way performs really well if you have enough data it works really
+well but in the arc domain where you have very little data you're very data constrainted it doesn't work as so very
+interesting to see All right, to summarize as we come to a close here, we figured HRM is very very
+interesting submission. It has legit scores. It has high performance. Uh specifically for the fact that it only
+trains on ARC. It doesn't pretend on anything else. We found that the hierarchive component to all of this, the actual HRM model and the Loop and H
+loop, it doesn't matter that much. It it makes a small difference, but it's not the main driver for the high performance. What really does make a
+difference is this outer refinement loop. The loop that makes a prediction and then iterates over it until it's
+happy with it. Um similarly data augmentation very important makes a significant difference but not to the
+amount that proposed in the paper significantly less and specifically at training time not so much at inference
+time is where it makes a difference. It's the same goal for the refinement training time very important inference time not so much
+and then then we have this tentative signal out of conversations not our own signal again kudos to the authors uh
+that the puzzle embeddings may be actually critical to learn efficiently on small data regimes which is again
+very very interesting and that leads to a few questions for future work. Uh the first one is what what specifically is
+the impact of the puzzle idea? You would like to see somebody run this experiment and compare 101. So we have some hot
+data on this or is this maybe an extremely smart thing to do for low data regimes to like just make learning
+easier. The second thing is how well does this entire pipeline the HRM pipeline generalize beyond its training
+data. It has to be trained on the data that it wants to evaluate on. Is there some way of fine-tuning HRM? As I
+understand it, the authors are currently working on this. So we'll see. then act at inference time, the sort of adaptive
+compute at inference time. Uh because right now they use always the max steps um at inference time. Maybe there's
+value in halting. Actually, I understand this is mostly a computational issue cuz it gets a bit of a mess if you hold some
+parts of your batch and then the rest are still to compute. So we'll see maybe there's some benefit in that. And then
+lastly, their approach is refining, but it's refining transductively. So it's on
+the actual prediction on the data domain. You do a refinement until you're happy with it. And it' be very interesting to see if a similar idea of
+refining but not on the data domain on the actual abstract program that does the transformation what uh work
+similarly. All right, I hope you took something away from it and yeah, see you guys around.

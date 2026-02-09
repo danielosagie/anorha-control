@@ -566,6 +566,16 @@ class TaskCurriculum:
         TaskCategory.DESKTOP: DESKTOP_TASKS,
     }
     
+    # Tasks with known slow/loop-prone behavior - excluded from sampling
+    SKIP_TASKS = frozenset({
+        "Product Hunt - Browse Today",      # Often loops on "Search box" / generic targets
+        "GitHub - Search Repository",       # "view top result" step often loops
+        "Human Benchmark - Reaction Time",  # Timing-sensitive; requires human reaction
+        "W3Schools - Input Form",           # Elements in iframe; Playwright main frame can't find
+        "UI Playground - Dynamic Buttons",  # Button moves; coords stale by click time
+        "GitHub Users Search",              # VLM types "Tokyo" instead of task query (torvalds)
+    })
+    
     # Category weights for balanced training
     CATEGORY_WEIGHTS = {
         TaskCategory.PRECISION: 0.35,   # Most important for TRM accuracy
@@ -629,6 +639,8 @@ class TaskCurriculum:
         
         # Filter by difficulty
         valid_tasks = [t for t in tasks if t.difficulty.value <= self.max_difficulty.value]
+        # Exclude slow/loop-prone tasks
+        valid_tasks = [t for t in valid_tasks if t.name not in self.SKIP_TASKS]
         
         if not valid_tasks:
             valid_tasks = tasks  # Fallback to all tasks in category

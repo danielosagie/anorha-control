@@ -31,6 +31,39 @@ from .trm import TRM, load_trm
 from .local_llm import LocalLLM, TaskStep
 
 
+def _infer_task_category(instruction: str) -> str:
+    """
+    Infer task category from instruction text for AnorhaTRM grounding.
+    Used when no explicit Task object is available (e.g. arbitrary user tasks).
+    Returns TaskCategory value string or "unknown".
+    """
+    text = (instruction or "").lower()
+    if not text:
+        return "unknown"
+    # Forms: login, sign in, form filling, submit
+    if any(k in text for k in ["login", "sign in", "log in", "form", "fill", "submit", "password", "credentials"]):
+        return "forms"
+    # Navigation: search, find, navigate, go to, open
+    if any(k in text for k in ["search", "find", "navigate", "go to", "open"]):
+        return "navigation"
+    # Ecommerce: cart, buy, checkout, shop, purchase
+    if any(k in text for k in ["cart", "checkout", "buy", "shop", "purchase", "add to cart"]):
+        return "ecommerce"
+    # Typing: type, typing, speed
+    if any(k in text for k in ["type", "typing", "speed test"]):
+        return "typing"
+    # Precision: click, aim, precision
+    if any(k in text for k in ["aim", "precision", "click to start", "reaction"]):
+        return "precision"
+    # Desktop: file, desktop, download, explorer
+    if any(k in text for k in ["file", "desktop", "download", "explorer"]):
+        return "desktop"
+    # Long-horizon: multi-step, book, reserve
+    if any(k in text for k in ["book", "reserve", "multi-step", "complex"]):
+        return "longhorizon"
+    return "unknown"
+
+
 @dataclass
 class AgentConfig:
     """Configuration for ComputerAgent."""
@@ -47,7 +80,7 @@ class AgentConfig:
     trm_use_text_encoder: bool = False  # Use text encoder for semantic instruction conditioning
     trajectory_trm_checkpoint: str = None  # Path to TrajectoryTRM for smooth movement
     use_trajectory_smoothing: bool = False  # Use TrajectoryTRM for smooth path to target
-    use_trajectory_smoothing: bool = False  # Use TrajectoryTRM for smooth path to target
+    anorha_trm_checkpoint: str = None  # Path to unified AnorhaTRM (grounding + trajectory); overrides both when set
     trm_fallback_to_vlm: bool = True  # Use VLM if TRM not confident
     trm_confidence_threshold: float = 0.7
     
@@ -122,12 +155,14 @@ class ComputerAgent:
         self._init_vlm()
         self._init_trm()
         self._init_trajectory_trm()
+        self._init_anorha_trm()
         self._init_orchestrator()
         
         print(f"[ComputerAgent] Initialized")
         print(f"  VLM: {self.config.vlm_model} via {self.config.vlm_backend}")
         print(f"  TRM: {'loaded' if self.trm else 'not loaded'}")
         print(f"  TrajectoryTRM: {'loaded' if self.trajectory_trm else 'not loaded'}")
+        print(f"  AnorhaTRM: {'loaded' if self.anorha_trm else 'not loaded'}")
         print(f"  Orchestrator: {self.config.orchestrator_model}")
     
     def _init_vlm(self):
@@ -154,6 +189,8 @@ class ComputerAgent:
     def _init_trajectory_trm(self):
         """Initialize TrajectoryTRM for smooth mouse movement."""
         self.trajectory_trm = None
+        if self.config.anorha_trm_checkpoint:
+            return  # AnorhaTRM provides trajectory; skip separate TrajectoryTRM
         if self.config.trajectory_trm_checkpoint and self.config.use_trajectory_smoothing:
             try:
                 from ..training.trm_training import load_trajectory_trm
@@ -161,10 +198,29 @@ class ComputerAgent:
                 print(f"[ComputerAgent] TrajectoryTRM loaded from {self.config.trajectory_trm_checkpoint}")
             except Exception as e:
                 print(f"[ComputerAgent] TrajectoryTRM load failed: {e}")
+
+    def _init_anorha_trm(self):
+        """Initialize unified AnorhaTRM (grounding + trajectory)."""
+        self.anorha_trm = None
+        self._anorha_trm_config = None
+        self._anorha_trm_char_to_idx = None
+        if not self.config.anorha_trm_checkpoint:
+            return
+        try:
+            from ..training.unified_trm import load_anorha_trm
+            model, cfg, char_to_idx = load_anorha_trm(self.config.anorha_trm_checkpoint)
+            self.anorha_trm = model
+            self._anorha_trm_config = cfg
+            self._anorha_trm_char_to_idx = char_to_idx
+            self.use_trajectory_smoothing = True  # AnorhaTRM provides trajectory
+            print(f"[ComputerAgent] AnorhaTRM loaded from {self.config.anorha_trm_checkpoint}")
+        except Exception as e:
+            print(f"[ComputerAgent] AnorhaTRM load failed: {e}")
     
     def _generate_trajectory(self, target_x: int, target_y: int) -> Optional[List[tuple]]:
-        """Generate smooth path from viewport center to target using TrajectoryTRM."""
-        if not self.trajectory_trm:
+        """Generate smooth path from viewport center to target using TrajectoryTRM or AnorhaTRM."""
+        model = self.anorha_trm if self.anorha_trm else self.trajectory_trm
+        if not model:
             return None
         import torch
         w, h = self.config.viewport_width, self.config.viewport_height
@@ -176,14 +232,17 @@ class ComputerAgent:
         vx, vy = 0.0, 0.0
         dt_norm = 0.05
         for _ in range(self.config.trajectory_max_steps):
-            dev = next(self.trajectory_trm.parameters()).device if list(self.trajectory_trm.parameters()) else "cpu"
+            dev = next(model.parameters()).device if list(model.parameters()) else "cpu"
             inp = torch.tensor(
                 [[cur_x_norm, cur_y_norm, tar_x_norm, tar_y_norm, vx, vy]],
                 dtype=torch.float32,
                 device=dev,
             )
             with torch.no_grad():
-                coords, click_prob = self.trajectory_trm(inp)
+                if self.anorha_trm:
+                    coords, click_prob = model.trajectory_step(inp)
+                else:
+                    coords, click_prob = model(inp)
             next_x_norm = coords[0, 0].item()
             next_y_norm = coords[0, 1].item()
             click_p = click_prob[0, 0].item()
@@ -255,9 +314,9 @@ class ComputerAgent:
             
             # Execute based on action type
             if action == "click":
-                result = await self.click(target)
+                result = await self.click(target, instruction=task)
             elif action == "type":
-                result = await self.type(value, target)
+                result = await self.type(value, target, instruction=task)
             elif action == "scroll":
                 result = await self.scroll(value or "down")
             else:
@@ -268,7 +327,7 @@ class ComputerAgent:
             # Verify if enabled
             if self.config.verify_actions and not result.success:
                 # Try recovery
-                recovered = await self._attempt_recovery(action, target)
+                recovered = await self._attempt_recovery(action, target, instruction=task)
                 if recovered:
                     results.append(recovered)
             
@@ -280,17 +339,27 @@ class ComputerAgent:
     # LOW-LEVEL ACTIONS
     # =========================================================================
     
-    async def click(self, target: str, retry: int = 0) -> ActionResult:
+    async def click(self, target: str, instruction: str = "", retry: int = 0) -> ActionResult:
         """
         Click on a target element.
         
-        Uses TRM for precision if available, falls back to VLM grounding.
+        Uses AnorhaTRM for grounding+trajectory when available, else TRM/VLM.
+        instruction: optional task context for task embedding (e.g. "Login to Gmail").
         """
         start = time.time()
         screenshot = await self.screenshot()
         
         # Step 1: Ground the element
-        grounding = self.vlm.locate(target, screenshot)
+        if self.anorha_trm and self._anorha_trm_config and self._anorha_trm_char_to_idx:
+            from ..training.unified_trm import anorha_trm_ground
+            task_category = _infer_task_category(instruction)
+            found, x, y, conf = anorha_trm_ground(
+                self.anorha_trm, self._anorha_trm_config, self._anorha_trm_char_to_idx,
+                target, screenshot, task_category=task_category
+            )
+            grounding = GroundingResult(found=found, x=x, y=y, confidence=conf)
+        else:
+            grounding = self.vlm.locate(target, screenshot)
         
         if not grounding.found:
             return ActionResult(
@@ -302,10 +371,10 @@ class ComputerAgent:
         
         # Step 2: Get precise coordinates
         x, y = grounding.x, grounding.y
-        source = "vlm"
+        source = "anorha_trm" if self.anorha_trm else "vlm"
         
-        # Use TRM if available and confident
-        if self.trm:
+        # Use TRM if available and confident (skip when AnorhaTRM did grounding)
+        if self.trm and not self.anorha_trm:
             try:
                 # Encode screen for TRM
                 from .vision_encoder import VisionEncoder
@@ -327,14 +396,13 @@ class ComputerAgent:
         
         # Step 3: Execute click (with optional trajectory smoothing)
         if self.page:
-            if self.trajectory_trm:
-                path = self._generate_trajectory(x, y)
-                if path:
-                    for px, py in path[:-1]:
-                        await self.page.mouse.move(px, py)
-                        await asyncio.sleep(0.02)
-                    x, y = path[-1]
-                    source = "trajectory_trm"
+            path = self._generate_trajectory(x, y) if (self.trajectory_trm or self.anorha_trm) else None
+            if path:
+                for px, py in path[:-1]:
+                    await self.page.mouse.move(px, py)
+                    await asyncio.sleep(0.02)
+                x, y = path[-1]
+                source = "anorha_trm" if self.anorha_trm else "trajectory_trm"
             await self.page.mouse.click(x, y)
         
         duration = (time.time() - start) * 1000
@@ -356,17 +424,18 @@ class ComputerAgent:
             duration_ms=duration
         )
     
-    async def type(self, text: str, target: str = None) -> ActionResult:
+    async def type(self, text: str, target: str = None, instruction: str = "") -> ActionResult:
         """
         Type text. If target specified, click it first.
         
         This is DIRECT execution - no TRM needed for keyboard.
+        instruction: optional task context for grounding (passed to click).
         """
         start = time.time()
         
         # Click target first if specified
         if target:
-            click_result = await self.click(target)
+            click_result = await self.click(target, instruction=instruction)
             if not click_result.success:
                 return ActionResult(
                     success=False,
@@ -404,7 +473,9 @@ class ComputerAgent:
             source="direct"
         )
     
-    async def _attempt_recovery(self, action: str, target: str) -> Optional[ActionResult]:
+    async def _attempt_recovery(
+        self, action: str, target: str, instruction: str = ""
+    ) -> Optional[ActionResult]:
         """
         Attempt recovery after failed action.
         
@@ -420,7 +491,7 @@ class ComputerAgent:
         await asyncio.sleep(0.3)
         
         if action == "click":
-            result = await self.click(target)
+            result = await self.click(target, instruction=instruction)
             if result.success:
                 return result
         
@@ -429,7 +500,7 @@ class ComputerAgent:
         await asyncio.sleep(0.3)
         
         if action == "click":
-            result = await self.click(target)
+            result = await self.click(target, instruction=instruction)
             if result.success:
                 return result
         
